@@ -1,0 +1,63 @@
+# LiveCDN Edge Agent 配置
+
+# 节点标识
+node_id = "edge-node-1"
+public_ip = "1.2.3.4"
+public_ipv6 = ""                    # IPv6 地址 (核心<->Agent 走 IPv6 更便宜, 留空则不用)
+port = 9090
+region = "华东"
+isp = "电信"
+
+# 带宽上限 (bytes/sec, 10MB/s ≈ 80Mbps)
+bw_limit = 10485760
+
+# 伪装域名 (Caddy 前置时使用)
+domain = "img-cdn-abc1.example.com"
+
+# 协议: ws / hls / grpc
+protocol = "ws"
+ws_path = "/ws/live"
+
+# TLS (Caddy 前置时设为 false)
+tls_enabled = false
+
+# 调度中心
+controller_url = "http://controller:8080"
+reg_token = "reg-token-change-me"
+
+# 监听地址
+listen_addr = ":9090"
+# listen_ipv6 = "[::]:9090"         # IPv6 监听 (核心<->Agent 通信)
+
+# 运行参数
+hb_interval_secs = 5      # 心跳间隔(秒)
+max_clients = 500          # 最大客户端数
+buffer_segments = 30       # 缓存分片数
+
+# HTTP-FLV 回源地址 (SRS 源站)
+# 默认从 controller_url 推导: http://controller:8080/live/{stream_key}.flv
+# 生产环境应显式配置:
+# origin_flv_url = "http://origin:8080/live/{stream_key}.flv"
+
+# ========== 级联回源 (减少核心带宽) ==========
+# 级联模式: Agent 从另一个 Agent 拉流, 而非直接从 Origin 拉流
+# 核心带宽 = 一级Agent数量 × 单流码率 (而非全部Agent)
+#
+# 典型部署 (50Mbps核心, 1080p 4Mbps):
+#   核心 → 6个一级Agent (24Mbps)
+#   每个一级Agent → 3个二级Agent (从一级拉流, 不走核心)
+#   总计: 24 Agent, 600 观众, 核心仅用 24Mbps
+#
+# 一级Agent (直连Origin):
+#   cascade_enabled = true     # 允许二级Agent从本节点拉流
+#   cascade_upstream 不设置    # 不从其他Agent拉流
+#
+# 二级Agent (从一级Agent拉流):
+#   cascade_enabled = false
+#   cascade_upstream = "http://一级Agent_IP:9090/live/{stream_key}.flv"
+#
+# cascade_enabled = false
+# cascade_upstream = ""
+
+# 伪装网站静态文件目录 (可选, 不设则使用内嵌博客)
+# disguise_dir = "/var/www/disguise"

@@ -1,0 +1,19 @@
+# LiveCDN Agent 配置 - 由 Ansible 自动生成
+# 节点: {{ inventory_hostname }}
+
+node_id = "{{ inventory_hostname }}"
+public_ip = "{{ ansible_host }}"
+port = {{ port }}
+region = "{{ region | default('默认') }}"
+isp = "{{ isp | default('默认') }}"
+bw_limit = {{ bw_limit }}
+domain = "{{ domain | default(inventory_hostname + '.livecdn.local') }}"
+protocol = "ws"
+ws_path = "/ws/live"
+tls_enabled = false
+controller_url = "{{ controller_url }}"
+reg_token = "{{ reg_token }}"
+listen_addr = ":{{ port }}"
+hb_interval_secs = 5
+max_clients = {{ max_clients }}
+buffer_segments = 30

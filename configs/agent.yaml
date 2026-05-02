@@ -1,0 +1,15 @@
+# Agent 边缘节点配置
+node_id: "edge-node-1"               # 节点唯一标识
+public_ip: "1.2.3.4"                 # 公网IP
+port: 9090                           # 对外服务端口
+region: "华东"                        # 地区
+isp: "电信"                          # 运营商
+bw_limit: 10485760                   # 带宽上限 (10MB/s = ~80Mbps)
+domain: "img-cdn-abc1.example.com"   # 伪装域名
+protocol: "ws"                       # ws / hls / grpc
+ws_path: "/ws/live"                  # WebSocket 路径
+tls_enabled: false                   # 是否启用TLS (Caddy前置时设为false)
+controller_url: "http://controller:8080"  # 调度中心地址
+reg_token: "reg-token-change-me"     # 注册令牌(与controller一致)
+listen_addr: ":9090"                 # 本地监听地址
+# disguise_dir: "/var/www/disguise"  # 伪装网站静态文件目录(可选)

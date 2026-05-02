@@ -1,0 +1,37 @@
+# LiveCDN 边缘节点 Caddy 反代配置
+# 用途: 自动 HTTPS + 伪装网站 + WebSocket 转发
+#
+# 前置条件:
+#   1. 域名 DNS 已指向本机 IP
+#   2. Caddy 已安装 (https://caddyserver.com/docs/install)
+#   3. Agent 已在 :9090 上运行
+
+# 主站点伪装域名
+img-cdn-{$NODE_ID}.yourdomain.com {
+    # 伪装网站 - 静态博客
+    root * /var/www/disguise
+    file_server
+
+    # WebSocket 代理到 Agent
+    handle_path /ws/* {
+        reverse_proxy localhost:9090
+    }
+
+    # HLS 代理
+    handle_path /live/* {
+        reverse_proxy localhost:9090
+    }
+
+    # 自动 HTTPS (Let's Encrypt)
+    # Caddy 会自动处理证书申请和续期
+}
+
+# 备用配置: 纯 HTTP (无域名/TLS 场景)
+# :9090 {
+#     root * /var/www/disguise
+#     file_server
+#
+#     handle_path /ws/* {
+#         reverse_proxy localhost:9091
+#     }
+# }

@@ -1,0 +1,78 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "在线节点数",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "livecdn_nodes_online", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] } } }
+    },
+    {
+      "title": "总节点数",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "livecdn_nodes_total", "refId": "A" }]
+    },
+    {
+      "title": "在线观众",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "livecdn_users_total", "refId": "A" }]
+    },
+    {
+      "title": "总带宽 (Mbps)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "livecdn_bandwidth_mbps", "refId": "A" }]
+    },
+    {
+      "title": "调度请求/秒",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "rate(livecdn_dispatch_total[1m])", "legendFormat": "总请求", "refId": "A" },
+        { "expr": "rate(livecdn_dispatch_fail_total[1m])", "legendFormat": "失败", "refId": "B" }
+      ]
+    },
+    {
+      "title": "调度延迟分布",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "rate(livecdn_dispatch_latency_bucket{le=\"5\"}[5m])", "legendFormat": "<5ms", "refId": "A" },
+        { "expr": "rate(livecdn_dispatch_latency_bucket{le=\"25\"}[5m])", "legendFormat": "<25ms", "refId": "B" },
+        { "expr": "rate(livecdn_dispatch_latency_bucket{le=\"50\"}[5m])", "legendFormat": "<50ms", "refId": "C" }
+      ]
+    },
+    {
+      "title": "心跳频率",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "rate(livecdn_heartbeat_total[1m])", "legendFormat": "心跳/秒", "refId": "A" }
+      ]
+    },
+    {
+      "title": "质量报告",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "rate(livecdn_quality_reports_total[1m])", "legendFormat": "报告/秒", "refId": "A" }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["livecdn"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "LiveCDN Overview",
+  "version": 1
+}

@@ -1,0 +1,15 @@
+# Controller 配置
+listen_addr: ":8080"
+origin_addr: "http://origin:8080"    # 源站地址 (SRS)
+reg_token: "reg-token-change-me"      # Agent 注册令牌
+admin_token: "admin-token-change-me"  # 管理员令牌
+cipher_suite: "chacha20"              # chacha20 / aes128
+hb_timeout: 15                        # 心跳超时(秒)
+stale_node_timeout: 120               # 失效节点清理(秒)
+
+# 域名切换池: 多域名轮询 + 秒级切换
+# 管理员可通过 Web UI 切换激活域名, 所有新调度使用新域名
+# domain_pool:
+#   - cdn1.example.com
+#   - cdn2.example.com
+#   - img-cdn.example.com

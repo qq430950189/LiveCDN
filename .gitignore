@@ -1,0 +1,61 @@
+# === Go ===
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.prof
+vendor/
+
+# === Rust ===
+agent-rust/target/
+agent-rust/Cargo.lock
+*.rs.bk
+
+# === 二进制 / 构建产物 ===
+binaries/
+*.bin
+build/
+
+# === 数据库 / 持久化 ===
+*.db
+*.bolt
+*.sqlite
+data/
+
+# === 日志 ===
+*.log
+logs/
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === 敏感文件 ===
+*.pem
+*.key
+*.crt
+*.secret
+.env
+.env.*
+
+# === 包管理缓存 ===
+.pnpm-store/
+node_modules/
+
+# === 临时文件 ===
+tmp/
+*.tmp
+*.bak
+*.timestamp
+
+# === OS ===
+.DS_Store
+ehthumbs.db

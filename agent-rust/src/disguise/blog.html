@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>个人博客</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Georgia,serif;max-width:780px;margin:0 auto;padding:20px 16px;color:#333;line-height:1.7;background:#fafafa}
+a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}
+header{margin-bottom:2em;padding-bottom:1em;border-bottom:2px solid #e5e7eb}
+header h1{font-size:1.6em;margin-bottom:0.3em;color:#111}
+header p{color:#6b7280;font-size:0.9em}
+nav{display:flex;gap:1.2em;margin-top:0.6em;font-size:0.9em}
+article{margin-bottom:1.8em;padding:1em 0;border-bottom:1px solid #f3f4f6}
+article h2{font-size:1.2em;margin-bottom:0.3em}
+article time{color:#9ca3af;font-size:0.8em}
+article p{margin-top:0.4em;color:#4b5563;font-size:0.95em}
+footer{margin-top:3em;padding-top:1em;border-top:1px solid #e5e7eb;color:#9ca3af;font-size:0.8em}
+</style>
+</head>
+<body>
+<header>
+<h1>技术随笔</h1>
+<p>记录学习与思考</p>
+<nav>
+<a href="/">首页</a>
+<a href="/about">关于</a>
+<a href="/archive">归档</a>
+<a href="/feed">订阅</a>
+</nav>
+</header>
+<main>
+<article>
+<h2><a href="#">浅谈微服务架构的设计原则</a></h2>
+<time>2024-11-15</time>
+<p>微服务并非银弹，但在合适的场景下确实能带来灵活性和可扩展性的提升。本文从实际项目出发，分享一些设计上的取舍经验。</p>
+</article>
+<article>
+<h2><a href="#">Rust 异步编程模型详解</a></h2>
+<time>2024-10-28</time>
+<p>从 Future trait 到 tokio 运行时，梳理 Rust 异步编程的核心概念和底层机制，以及与 Go goroutine 的对比。</p>
+</article>
+<article>
+<h2><a href="#">高效构建低延迟直播系统</a></h2>
+<time>2024-10-10</time>
+<p>探讨如何利用边缘节点和智能调度构建低成本、低延迟的直播分发网络，从协议选型到架构设计。</p>
+</article>
+</main>
+<footer>
+<p>&copy; 2024 技术随笔 · 保留所有权利</p>
+</footer>
+</body>
+</html>

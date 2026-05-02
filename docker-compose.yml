@@ -1,0 +1,84 @@
+# LiveCDN 部署架构
+
+## 核心服务 (Docker 部署，跑在一台稳定 VPS 上)
+# - Controller (调度中心 + bbolt 持久化)
+# - Origin 主源 (SRS)
+# - Origin 备源 (SRS, 主源 forward 到备源)
+# - Web 播放器 (Nginx)
+
+## 边缘节点 (裸机运行，NAT 挂机宝)
+# - 下载单个二进制文件 (~3MB)
+# - 生成 TOML 配置
+# - systemd 管理
+# - 无需 Docker / 无需运行时 / 静态链接
+
+version: "3.8"
+
+services:
+  # 主源站 - SRS
+  origin:
+    image: ossrs/srs:5
+    container_name: livecdn-origin
+    ports:
+      - "1935:1935"    # RTMP
+      - "8088:8080"    # HLS / HTTP-FLV
+      - "1985:1985"    # API
+      - "8890:8890/udp" # SRT
+    volumes:
+      - ./origin/srs.conf:/usr/local/srs/conf/srs.conf
+    networks:
+      - livecdn
+    restart: unless-stopped
+
+  # 备源站 - SRS (主源 forward 到备源)
+  origin-backup:
+    image: ossrs/srs:5
+    container_name: livecdn-origin-backup
+    ports:
+      - "1936:1935"    # RTMP (不同端口避免冲突)
+      - "8089:8090"    # HLS / HTTP-FLV
+    volumes:
+      - ./origin/srs-backup.conf:/usr/local/srs/conf/srs.conf
+    networks:
+      - livecdn
+    restart: unless-stopped
+
+  # 调度中心 (Go) + bbolt 持久化
+  controller:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.controller
+    container_name: livecdn-controller
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs/controller.yaml:/app/configs/controller.yaml
+      - controller-data:/app/data   # bbolt 持久化目录
+    environment:
+      - CONTROLLER_LISTEN=:8080
+      - ORIGIN_ADDR=http://origin:8080
+      - BACKUP_ORIGIN_ADDR=http://origin-backup:8090
+    depends_on:
+      - origin
+    networks:
+      - livecdn
+    restart: unless-stopped
+
+  # Web 播放器
+  web:
+    image: nginx:alpine
+    container_name: livecdn-web
+    ports:
+      - "3000:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    networks:
+      - livecdn
+    restart: unless-stopped
+
+volumes:
+  controller-data:
+
+networks:
+  livecdn:
+    driver: bridge

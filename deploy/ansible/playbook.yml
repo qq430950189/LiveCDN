@@ -1,0 +1,93 @@
+---
+# LiveCDN Agent 批量部署 Ansible Playbook
+# 用法: ansible-playbook -i hosts playbook.yml
+#
+# hosts 文件格式:
+# [edge_nodes]
+# node1 ansible_host=1.2.3.4 region=华东 isp=电信
+# node2 ansible_host=5.6.7.8 region=华南 isp=移动
+
+- name: Deploy LiveCDN Agent to edge nodes
+  hosts: edge_nodes
+  become: yes
+  vars:
+    controller_url: "http://YOUR_CONTROLLER:8080"
+    reg_token: "reg-token-change-me"
+    install_dir: "/opt/livecdn"
+    config_dir: "/etc/livecdn"
+    binary_url: "{{ controller_url }}/downloads/livecdn-agent-x86_64-unknown-linux-musl"
+    bw_limit: 10485760
+    max_clients: 500
+    port: 9090
+
+  tasks:
+    - name: Check if agent is already running
+      command: systemctl is-active livecdn-agent
+      register: agent_status
+      failed_when: false
+      changed_when: false
+
+    - name: Download agent binary
+      get_url:
+        url: "{{ binary_url }}"
+        dest: "{{ install_dir }}/livecdn-agent"
+        mode: '0755'
+        force: yes
+      when: agent_status.rc != 0
+
+    - name: Generate config
+      template:
+        src: agent.toml.j2
+        dest: "{{ config_dir }}/agent.toml"
+      notify: restart agent
+
+    - name: Install systemd service
+      copy:
+        dest: /etc/systemd/system/livecdn-agent.service
+        content: |
+          [Unit]
+          Description=LiveCDN Edge Agent
+          After=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart={{ install_dir }}/livecdn-agent -c {{ config_dir }}/agent.toml
+          Restart=always
+          RestartSec=3
+          LimitNOFILE=65536
+          MemoryMax=48M
+          CPUQuota=30%
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: restart agent
+
+    - name: Enable and start agent
+      systemd:
+        name: livecdn-agent
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Wait for agent to start
+      wait_for:
+        port: "{{ port }}"
+        delay: 2
+        timeout: 10
+
+    - name: Check agent health
+      uri:
+        url: "http://localhost:{{ port }}/health"
+        return_content: yes
+      register: health
+      failed_when: "'ok' not in health.content"
+
+    - name: Display status
+      debug:
+        msg: "Agent {{ inventory_hostname }} is running. Health: {{ health.content }}"
+
+  handlers:
+    - name: restart agent
+      systemd:
+        name: livecdn-agent
+        state: restarted

@@ -1,0 +1,52 @@
+groups:
+  - name: livecdn
+    rules:
+      # 所有节点离线
+      - alert: LiveCDNAllNodesDown
+        expr: livecdn_nodes_online == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "所有边缘节点离线"
+          description: "没有在线的边缘节点，直播服务不可用"
+
+      # 节点数量骤降
+      - alert: LiveCDNNodesDrop
+        expr: (livecdn_nodes_online / livecdn_nodes_total) < 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "在线节点比例过低 ({{ $value | humanizePercentage }})"
+          description: "超过 70% 的节点离线，可能影响服务质量"
+
+      # 调度失败率高
+      - alert: LiveCDNDispatchFailRate
+        expr: rate(livecdn_dispatch_fail_total[5m]) / rate(livecdn_dispatch_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "调度失败率 > 10%"
+          description: "当前调度失败率 {{ $value | humanizePercentage }}，可能节点不足"
+
+      # 带宽超限
+      - alert: LiveCDNBandwidthHigh
+        expr: livecdn_bandwidth_mbps > 800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "总带宽超过 800Mbps"
+          description: "当前总带宽 {{ $value }}Mbps，接近上限"
+
+      # 观众数异常多
+      - alert: LiveCDNViewerSpike
+        expr: livecdn_users_total > 400
+        for: 2m
+        labels:
+          severity: info
+        annotations:
+          summary: "观众数超过 400"
+          description: "当前观众 {{ $value }} 人，系统设计容量 500 人"

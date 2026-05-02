@@ -1,0 +1,60 @@
+[package]
+name = "livecdn-agent"
+version = "0.1.0"
+edition = "2021"
+description = "LiveCDN edge node agent - high performance, low resource usage"
+
+[profile.release]
+opt-level = "z"          # 优化体积
+lto = true               # 链接时优化
+codegen-units = 1        # 单编译单元，更好优化
+strip = true             # 去除符号
+panic = "abort"          # 减小二进制
+
+[dependencies]
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# HTTP 服务
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+
+# WebSocket
+tokio-tungstenite = "0.24"
+
+# HTTP 客户端 (回源拉流) - 用 rustls 静态链接，零系统依赖
+reqwest = { version = "0.12", default-features = false, features = ["json", "http2", "rustls-tls", "charset", "stream"] }
+
+# 加密
+ring = "0.17"
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 配置
+toml = "0.8"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# 工具
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+thiserror = "2"
+base64 = "0.22"
+futures-util = "0.3"
+async-trait = "0.1"
+libc = "0.2"
+
+# 字符串混淆 (编译时加密, 防止 strings 命令提取敏感信息)
+obfstr = "0.4"
+
+# 自更新 (启动时检查新版本, 自动下载替换)
+self_update = { version = "0.42", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+criterion = "0.5"

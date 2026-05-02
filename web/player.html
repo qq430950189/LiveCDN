@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LiveCDN Player</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh}
+.header{width:100%;padding:16px 24px;background:#111;border-bottom:1px solid #222;display:flex;align-items:center;justify-content:space-between}
+.header h1{font-size:18px;color:#e94560}
+.header .status{font-size:13px;color:#888}
+.container{width:100%;max-width:960px;padding:20px}
+.video-wrapper{position:relative;width:100%;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9}
+.video-wrapper video{width:100%;height:100%;object-fit:contain}
+.overlay{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:10}
+.overlay .spinner{width:48px;height:48px;border:3px solid #333;border-top-color:#e94560;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.overlay.hidden{display:none}
+.overlay.error{background:rgba(180,20,20,0.7)}
+.controls{margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.controls input{flex:1;min-width:160px;padding:10px 14px;background:#1a1a2e;border:1px solid #333;border-radius:6px;color:#eee;font-size:14px;outline:none}
+.controls input:focus{border-color:#e94560}
+.controls button{padding:10px 20px;background:#e94560;border:none;border-radius:6px;color:#fff;font-size:14px;cursor:pointer;transition:background 0.2s}
+.controls button:hover{background:#c73652}
+.controls button:disabled{background:#444;cursor:not-allowed}
+.mode-select{padding:10px 14px;background:#1a1a2e;border:1px solid #333;border-radius:6px;color:#eee;font-size:14px;outline:none}
+.mode-select:focus{border-color:#e94560}
+.stats{margin-top:16px;padding:14px;background:#111;border-radius:8px;font-size:13px;font-family:monospace}
+.stats .row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #1a1a1a}
+.stats .label{color:#888}
+.stats .value{color:#4ecca3}
+.stats .bad{color:#e94560}
+.node-list{margin-top:16px}
+.node-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#111;border-radius:6px;margin-bottom:6px;font-size:13px}
+.node-dot{width:8px;height:8px;border-radius:50%;background:#4ecca3;flex-shrink:0}
+.node-dot.active{background:#4ecca3;box-shadow:0 0 6px #4ecca3}
+.node-dot.backup{background:#f5a623}
+.node-dot.dead{background:#e94560}
+.node-info{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node-latency{color:#888;font-family:monospace}
+.log{margin-top:16px;padding:14px;background:#0d0d0d;border-radius:8px;max-height:200px;overflow-y:auto;font-size:12px;font-family:monospace;line-height:1.6}
+.log .info{color:#4ecca3}
+.log .warn{color:#f5a623}
+.log .error{color:#e94560}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>LiveCDN Player</h1>
+  <div class="status" id="statusText">未连接</div>
+</div>
+
+<div class="container">
+  <div class="video-wrapper">
+    <video id="videoPlayer" autoplay muted playsinline></video>
+    <div class="overlay" id="overlay">
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <input type="text" id="tokenInput" placeholder="观看令牌 (Token)" />
+    <input type="text" id="streamInput" placeholder="流名称 (Stream Key)" />
+    <select class="mode-select" id="modeSelect">
+      <option value="auto">自动 (推荐)</option>
+      <option value="http-flv">HTTP-FLV (低延迟)</option>
+      <option value="ws-flv">WS-FLV</option>
+      <option value="hls">LL-HLS (兼容)</option>
+      <option value="ws-encrypted">WS 加密</option>
+    </select>
+    <button id="connectBtn" onclick="startPlayback()">连接</button>
+    <button id="stopBtn" onclick="stopPlayback()" disabled>断开</button>
+  </div>
+
+  <div class="stats" id="statsPanel" style="display:none">
+    <div class="row"><span class="label">状态</span><span class="value" id="statStatus">-</span></div>
+    <div class="row"><span class="label">协议</span><span class="value" id="statProtocol">-</span></div>
+    <div class="row"><span class="label">当前节点</span><span class="value" id="statNode">-</span></div>
+    <div class="row"><span class="label">端到端延迟</span><span class="value" id="statLatency">-</span></div>
+    <div class="row"><span class="label">缓冲</span><span class="value" id="statBuffer">-</span></div>
+    <div class="row"><span class="label">切换次数</span><span class="value" id="statSwitches">0</span></div>
+    <div class="row"><span class="label">解密</span><span class="value" id="statCipher">-</span></div>
+    <div class="row"><span class="label">播放速率</span><span class="value" id="statPlaybackRate">1.00x</span></div>
+  </div>
+
+  <div class="node-list" id="nodeList"></div>
+  <div class="log" id="logPanel"></div>
+</div>
+
+<!-- mpegts.js for HTTP-FLV / WS-FLV playback -->
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+<!-- hls.js for LL-HLS playback -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+
+<script>
+// ============================================================
+// LiveCDN Web Player - 核心逻辑
+// 支持: HTTP-FLV (mpegts.js) + LL-HLS (hls.js) + WS 加密
+// 自动协商: 优先 HTTP-FLV → LL-HLS → WS 加密
+// ============================================================
+
+const state = {
+  connected: false,
+  ws: null,
+  nodes: [],
+  currentNode: null,
+  sessionID: '',
+  streamKey: '',
+  token: '',
+  mode: 'auto',       // auto / http-flv / ws-flv / hls / ws-encrypted
+  activeMode: '',     // 实际使用的模式
+  mpegtsPlayer: null,
+  hlsPlayer: null,
+  switchCount: 0,
+  lastDataTime: 0,
+  qualityReportTimer: null,
+  seqNum: 0,
+  controllerURL: '',
+  playbackRateTimer: null,    // playbackRate P控制器
+  targetBufferMs: 1000,       // 由档位下发, 极速300/标准1000/抗弱网3000
+};
+
+const $ = id => document.getElementById(id);
+const video = $('videoPlayer');
+const overlay = $('overlay');
+
+function log(msg, level = 'info') {
+  const panel = $('logPanel');
+  const time = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = level;
+  line.textContent = `[${time}] ${msg}`;
+  panel.appendChild(line);
+  panel.scrollTop = panel.scrollHeight;
+  if (panel.children.length > 200) panel.removeChild(panel.firstChild);
+}
+
+// --- 协议能力检测 ---
+function detectBestMode() {
+  // 优先级: HTTP-FLV > LL-HLS > WS 加密
+  if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
+    return 'http-flv';
+  }
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    return 'hls';
+  }
+  // Safari 原生 HLS
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    return 'hls';
+  }
+  // 兜底: WS 加密
+  return 'ws-encrypted';
+}
+
+// ============================================================
+// HTTP-FLV 播放 (mpegts.js) — 延迟 0.8-1.5s
+// ============================================================
+function playHTTP_FLV(url) {
+  if (!mpegts.isSupported()) {
+    throw new Error('浏览器不支持 HTTP-FLV (mpegts.js)');
+  }
+
+  log(`[HTTP-FLV] 连接: ${url}`);
+
+  const player = mpegts.createPlayer({
+    type: 'flv',
+    url: url,
+    isLive: true,
+    hasAudio: true,
+    hasVideo: true,
+  }, {
+    enableWorker: true,
+    enableStashBuffer: false,   // 低延迟: 关闭缓冲
+    stashInitialSize: 128,      // 最小初始缓冲
+    autoCleanupSourceBuffer: true,
+    autoCleanupMaxBackwardDuration: 3,
+    autoCleanupMinBackwardDuration: 2,
+    liveBufferLatencyChasing: true,
+    liveBufferLatencyChasingOnPaused: true,
+    liveSyncDurationCount: 1,   // 只追1个分片
+    lazyLoadMaxDuration: 3 * 60,
+    lazyLoadRecoverDuration: 30,
+    deferLoadAfterSourceOpen: false,
+  });
+
+  player.attachMediaElement(video);
+  player.load();
+  player.play();
+
+  player.on(mpegts.Events.ERROR, (errType, errDetail, errInfo) => {
+    log(`[HTTP-FLV] 错误: ${errType} - ${errDetail}`, 'error');
+    if (errType === mpegts.ErrorTypes.NETWORK_ERROR) {
+      log('[HTTP-FLV] 网络错误, 尝试重连...', 'warn');
+      setTimeout(() => {
+        if (state.connected) {
+          player.unload();
+          player.load();
+          player.play();
+        }
+      }, 2000);
+    }
+  });
+
+  player.on(mpegts.Events.STATISTICS_INFO, (stats) => {
+    // 更新延迟统计
+    if (stats.decodedFrames !== undefined) {
+      state.lastDataTime = Date.now();
+    }
+  });
+
+  state.activeMode = 'http-flv';
+  state.mpegtsPlayer = player;
+  return player;
+}
+
+// ============================================================
+// WS-FLV 播放 (mpegts.js over WebSocket) — 延迟 0.8-1.5s
+// ============================================================
+function playWS_FLV(wsUrl) {
+  if (!mpegts.isSupported()) {
+    throw new Error('浏览器不支持 WS-FLV (mpegts.js)');
+  }
+
+  log(`[WS-FLV] 连接: ${wsUrl}`);
+
+  const player = mpegts.createPlayer({
+    type: 'flv',
+    url: wsUrl,
+    isLive: true,
+    hasAudio: true,
+    hasVideo: true,
+  }, {
+    enableWorker: true,
+    enableStashBuffer: false,
+    stashInitialSize: 128,
+    autoCleanupSourceBuffer: true,
+    autoCleanupMaxBackwardDuration: 3,
+    autoCleanupMinBackwardDuration: 2,
+    liveBufferLatencyChasing: true,
+    liveSyncDurationCount: 1,
+  });
+
+  player.attachMediaElement(video);
+  player.load();
+  player.play();
+
+  player.on(mpegts.Events.ERROR, (errType, errDetail) => {
+    log(`[WS-FLV] 错误: ${errType} - ${errDetail}`, 'error');
+  });
+
+  state.activeMode = 'ws-flv';
+  state.mpegtsPlayer = player;
+  return player;
+}
+
+// ============================================================
+// LL-HLS 播放 (hls.js / Safari 原生) — 延迟 1.5-2.5s
+// ============================================================
+function playLLHLS(url) {
+  log(`[LL-HLS] 连接: ${url}`);
+
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      backBufferLength: 90,
+      maxBufferLength: 10,
+      maxMaxBufferLength: 30,
+      maxBufferSize: 60 * 1000 * 1000,
+      maxBufferHole: 0.5,
+      liveSyncDurationCount: 1,   // 追1个分片
+      liveMaxLatencyDurationCount: 3,
+      liveDurationInfinity: true,
+      progressive: true,
+    });
+
+    hls.loadSource(url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      video.play().catch(e => log('播放失败: ' + e, 'error'));
+    });
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      log(`[LL-HLS] 错误: ${data.details}`, 'error');
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            log('[LL-HLS] 网络错误, 尝试恢复...', 'warn');
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            log('[LL-HLS] 媒体错误, 尝试恢复...', 'warn');
+            hls.recoverMediaError();
+            break;
+          default:
+            log('[LL-HLS] 致命错误, 无法恢复', 'error');
+            hls.destroy();
+            break;
+        }
+      }
+    });
+    hls.on(Hls.Events.FRAG_LOADED, () => {
+      state.lastDataTime = Date.now();
+    });
+
+    state.activeMode = 'hls';
+    state.hlsPlayer = hls;
+    return hls;
+  }
+
+  // Safari 原生 HLS
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url;
+    video.play().catch(e => log('播放失败: ' + e, 'error'));
+    state.activeMode = 'hls';
+    return null;
+  }
+
+  throw new Error('浏览器不支持 HLS');
+}
+
+// ============================================================
+// WS 加密模式 — 原始实现, 自定义协议帧解密
+// ============================================================
+class StreamDecryptor {
+  constructor(keyBase64, cipherSuite) {
+    this.cipherSuite = cipherSuite;
+    this.seqNum = 0;
+    const keyStr = atob(keyBase64);
+    this.key = new Uint8Array(keyStr.length);
+    for (let i = 0; i < keyStr.length; i++) {
+      this.key[i] = keyStr.charCodeAt(i);
+    }
+  }
+
+  async decrypt(data) {
+    return await this.decryptAESGCM(data);
+  }
+
+  async decryptAESGCM(data) {
+    if (data.byteLength < 28) return data;
+    const nonce = data.slice(0, 12);
+    const ciphertext = data.slice(12);
+    const derivedKey = await this.deriveChunkKey(this.seqNum);
+    this.seqNum++;
+    try {
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: nonce },
+        derivedKey,
+        ciphertext
+      );
+      return new Uint8Array(decrypted);
+    } catch (e) {
+      console.warn('解密失败:', e);
+      return data;
+    }
+  }
+
+  async deriveChunkKey(seq) {
+    const seqBuf = new ArrayBuffer(4);
+    new DataView(seqBuf).setUint32(0, seq);
+    const combined = new Uint8Array(this.key.length + 4);
+    combined.set(this.key, 0);
+    combined.set(new Uint8Array(seqBuf), this.key.length);
+    const hash = await crypto.subtle.digest('SHA-256', combined);
+    return await crypto.subtle.importKey(
+      'raw', hash.slice(0, this.key.length),
+      { name: 'AES-GCM' }, false, ['decrypt']
+    );
+  }
+}
+
+// MSE for encrypted WS mode
+function initMSE() {
+  return new Promise((resolve, reject) => {
+    if (!window.MediaSource) {
+      reject(new Error('浏览器不支持 MSE'));
+      return;
+    }
+    const ms = new MediaSource();
+    video.src = URL.createObjectURL(ms);
+    state.mediaSource = ms;
+    ms.addEventListener('sourceopen', () => {
+      try {
+        const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.64001f,mp4a.40.2"');
+        sb.mode = 'segments';
+        state.sourceBuffer = sb;
+        resolve();
+      } catch (e) {
+        try {
+          const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E,mp4a.40.2"');
+          sb.mode = 'segments';
+          state.sourceBuffer = sb;
+          resolve();
+        } catch (e2) { reject(e2); }
+      }
+    }, { once: true });
+  });
+}
+
+let decryptor = null;
+
+async function handleStreamData(rawData) {
+  if (!rawData || rawData.byteLength < 21) return;
+  const data = new Uint8Array(rawData);
+  if (data[0] !== 0x48 || data[1] !== 0x54) {
+    feedToMSE(data);
+    return;
+  }
+  const version = data[2];
+  let frameType, originTs, payloadLen, headerSize;
+  if (version >= 3) {
+    // v3: [Magic 2B][Version 1B][Type 1B][Flags 1B][Seq 4B][OriginTS 8B][Len 4B] = 21B
+    frameType = data[3];
+    // seq at 5-8, origin_ts at 9-16, payload_len at 17-20
+    originTs = new DataView(data.buffer, data.byteOffset + 9, 8).getBigUint64(0);
+    payloadLen = (data[17] << 24) | (data[18] << 16) | (data[19] << 8) | data[20];
+    headerSize = 21;
+  } else {
+    // v2: [Magic 2B][Type 1B][Flags 1B][Seq 4B][OriginTS 8B][Len 4B] = 20B
+    frameType = data[2];
+    originTs = new DataView(data.buffer, data.byteOffset + 8, 8).getBigUint64(0);
+    payloadLen = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
+    headerSize = 20;
+  }
+  const payload = data.slice(headerSize, headerSize + payloadLen);
+  state.lastDataTime = Date.now();
+
+  // 端到端延迟测量
+  if (originTs > 0n) {
+    const e2e = Date.now() - Number(originTs);
+    $('statLatency').textContent = e2e + 'ms';
+    $('statLatency').className = e2e > 3000 ? 'value bad' : 'value';
+  }
+
+  if (frameType === 0x02) {
+    let decrypted;
+    if (decryptor) {
+      try { decrypted = await decryptor.decrypt(payload); }
+      catch { decrypted = payload; }
+    } else {
+      decrypted = payload;
+    }
+    feedToMSE(decrypted);
+  }
+}
+
+function feedToMSE(data) {
+  if (!state.sourceBuffer) return;
+  if (data.length >= 8) {
+    const type = String.fromCharCode(data[4], data[5], data[6], data[7]);
+    if (['ftyp', 'moof', 'mdat', 'moov', 'mfra'].includes(type)) {
+      appendToSourceBuffer(data); return;
+    }
+  }
+  if (data.length > 0 && data[0] === 0x47) {
+    appendToSourceBuffer(data); return;
+  }
+  appendToSourceBuffer(data);
+}
+
+function appendToSourceBuffer(data) {
+  const sb = state.sourceBuffer;
+  if (!sb || sb.updating) {
+    if (!state._pendingData) state._pendingData = [];
+    state._pendingData.push(data);
+    return;
+  }
+  try { sb.appendBuffer(data); }
+  catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      try { if (sb.buffered.length > 0) sb.remove(0, sb.buffered.end(0) - 10); }
+      catch {}
+    }
+  }
+}
+
+setInterval(() => {
+  if (state.sourceBuffer && !state.sourceBuffer.updating && state._pendingData?.length > 0) {
+    try { state.sourceBuffer.appendBuffer(state._pendingData.shift()); }
+    catch {}
+  }
+}, 100);
+
+async function playWSEncrypted(nodeUrl) {
+  await initMSE();
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(nodeUrl, 'binary');
+    ws.binaryType = 'arraybuffer';
+    const timeout = setTimeout(() => { ws.close(); reject(new Error('连接超时')); }, 5000);
+    ws.onopen = () => {
+      clearTimeout(timeout);
+      ws.send(JSON.stringify({ stream_key: state.streamKey, token: state.token, mode: 'encrypted' }));
+      log('[WS加密] 已连接');
+      resolve(ws);
+    };
+    ws.onerror = (e) => { clearTimeout(timeout); reject(e); };
+    ws.onclose = () => { if (state.connected) { log('[WS加密] 断开', 'warn'); } };
+    ws.onmessage = (e) => { handleStreamData(e.data); };
+    state.ws = ws;
+    state.activeMode = 'ws-encrypted';
+  });
+}
+
+// ============================================================
+// 调度请求
+// ============================================================
+async function requestDispatch() {
+  const resp = await fetch(state.controllerURL + '/api/player/dispatch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stream_key: state.streamKey, token: state.token, client_ip: '' })
+  });
+  if (!resp.ok) throw new Error('调度请求失败: ' + resp.status);
+  return await resp.json();
+}
+
+// ============================================================
+// 主控制
+// ============================================================
+window.startPlayback = async function() {
+  const token = $('tokenInput').value.trim();
+  const streamKey = $('streamInput').value.trim();
+  const controllerURL = new URLSearchParams(window.location.search).get('controller') || '';
+
+  if (!token || !streamKey) {
+    alert('请输入观看令牌和流名称');
+    return;
+  }
+
+  state.token = token;
+  state.streamKey = streamKey;
+  state.controllerURL = controllerURL || window.location.origin;
+  state.connected = true;
+  state.switchCount = 0;
+
+  let mode = $('modeSelect').value;
+  if (mode === 'auto') {
+    mode = detectBestMode();
+    log(`自动选择模式: ${mode}`);
+  }
+  state.mode = mode;
+
+  $('connectBtn').disabled = true;
+  $('stopBtn').disabled = false;
+  $('statsPanel').style.display = 'block';
+  $('statusText').textContent = '连接中...';
+  overlay.classList.remove('hidden', 'error');
+
+  try {
+    // 请求调度
+    const data = await requestDispatch();
+    state.nodes = data.nodes || [];
+    state.sessionID = data.session_id;
+
+    if (data.encrypt_key) {
+      decryptor = new StreamDecryptor(data.encrypt_key, data.cipher_suite || 'aes-128-gcm');
+      $('statCipher').textContent = data.cipher_suite || 'AES-128-GCM';
+    }
+
+    updateNodeList();
+
+    if (state.nodes.length === 0) {
+      throw new Error('没有可用节点');
+    }
+
+    // 获取第一个节点的 URL 信息
+    const node = state.nodes[0];
+    state.currentNode = node;
+
+    // 构建播放 URL
+    const protocol = node.protocol || 'ws';
+    const domain = node.domain || window.location.hostname;
+    const port = node.port || '';
+    const wsPath = node.ws_path || '/ws/live';
+    const baseUrl = port ? `${domain}:${port}` : domain;
+
+    let playSuccess = false;
+
+    // 按模式播放
+    switch (mode) {
+      case 'http-flv': {
+        const flvUrl = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}.flv`;
+        try {
+          playHTTP_FLV(flvUrl);
+          playSuccess = true;
+        } catch (e) {
+          log(`HTTP-FLV 失败: ${e}, 降级到 LL-HLS`, 'warn');
+        }
+        break;
+      }
+      case 'ws-flv': {
+        const wsUrl = `${protocol === 'wss' ? 'wss' : 'ws'}://${baseUrl}${wsPath}`;
+        try {
+          playWS_FLV(wsUrl);
+          playSuccess = true;
+        } catch (e) {
+          log(`WS-FLV 失败: ${e}, 降级到 LL-HLS`, 'warn');
+        }
+        break;
+      }
+      case 'hls': {
+        const hlsUrl = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}/stream.m3u8`;
+        try {
+          playLLHLS(hlsUrl);
+          playSuccess = true;
+        } catch (e) {
+          log(`LL-HLS 失败: ${e}`, 'error');
+        }
+        break;
+      }
+      case 'ws-encrypted': {
+        const wsUrl = `${protocol === 'wss' ? 'wss' : 'ws'}://${baseUrl}${wsPath}`;
+        try {
+          await playWSEncrypted(wsUrl);
+          playSuccess = true;
+        } catch (e) {
+          log(`WS加密 失败: ${e}`, 'error');
+        }
+        break;
+      }
+    }
+
+    // 降级: HTTP-FLV → LL-HLS → WS 加密
+    if (!playSuccess && mode !== 'hls') {
+      log('尝试降级到 LL-HLS...', 'warn');
+      try {
+        const hlsUrl = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}/stream.m3u8`;
+        playLLHLS(hlsUrl);
+        playSuccess = true;
+      } catch (e2) {
+        log(`LL-HLS 也失败: ${e2}`, 'error');
+      }
+    }
+
+    if (!playSuccess && mode !== 'ws-encrypted') {
+      log('尝试降级到 WS 加密模式...', 'warn');
+      try {
+        const wsUrl = `${protocol === 'wss' ? 'wss' : 'ws'}://${baseUrl}${wsPath}`;
+        await playWSEncrypted(wsUrl);
+        playSuccess = true;
+      } catch (e3) {
+        log(`WS加密也失败: ${e3}`, 'error');
+      }
+    }
+
+    if (!playSuccess) {
+      throw new Error('所有播放模式均失败');
+    }
+
+    $('statProtocol').textContent = state.activeMode.toUpperCase();
+    $('statusText').textContent = '播放中';
+    overlay.classList.add('hidden');
+    log(`播放已开始 (${state.activeMode})`);
+
+    // 启动播放速率自适应
+    startPlaybackRateControl();
+
+    // 质量上报
+    state.qualityReportTimer = setInterval(() => {
+      if (state.currentNode && state.sessionID) {
+        const stallRate = video.paused ? 0.5 : 0;
+        reportQuality(state.currentNode, stallRate, '');
+      }
+    }, 30000);
+
+  } catch (e) {
+    log('启动失败: ' + e, 'error');
+    overlay.classList.add('error');
+    overlay.innerHTML = `<div style="text-align:center"><h3>连接失败</h3><p>${e.message}</p></div>`;
+    $('statusText').textContent = '连接失败';
+    $('connectBtn').disabled = false;
+    $('stopBtn').disabled = true;
+    state.connected = false;
+  }
+};
+
+window.stopPlayback = function() {
+  state.connected = false;
+
+  // 关闭 mpegts.js
+  if (state.mpegtsPlayer) {
+    state.mpegtsPlayer.pause();
+    state.mpegtsPlayer.unload();
+    state.mpegtsPlayer.detachMediaElement();
+    state.mpegtsPlayer.destroy();
+    state.mpegtsPlayer = null;
+  }
+
+  // 关闭 hls.js
+  if (state.hlsPlayer) {
+    state.hlsPlayer.destroy();
+    state.hlsPlayer = null;
+  }
+
+  if (state.ws) { state.ws.close(); state.ws = null; }
+  if (state.mediaSource && state.mediaSource.readyState === 'open') {
+    state.mediaSource.endOfStream();
+  }
+  if (state.qualityReportTimer) clearInterval(state.qualityReportTimer);
+
+  // 停止播放速率自适应
+  stopPlaybackRateControl();
+
+  video.src = '';
+  video.load();
+  decryptor = null;
+  state.sourceBuffer = null;
+  state.mediaSource = null;
+
+  overlay.classList.remove('hidden', 'error');
+  overlay.innerHTML = '<div class="spinner"></div>';
+
+  $('connectBtn').disabled = false;
+  $('stopBtn').disabled = true;
+  $('statusText').textContent = '已断开';
+  $('statsPanel').style.display = 'none';
+  $('nodeList').innerHTML = '';
+  $('logPanel').innerHTML = '';
+  log('已断开连接');
+};
+
+// --- 质量上报 ---
+function reportQuality(node, stallRate, error) {
+  if (!node || !state.sessionID) return;
+  fetch(state.controllerURL + '/api/player/report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: state.sessionID,
+      node_id: node.domain,
+      stall_rate: stallRate,
+      e2e_latency_ms: state.lastDataTime ? Date.now() - state.lastDataTime : 0,
+      error: error || ''
+    })
+  }).catch(() => {});
+}
+
+// --- UI ---
+function updateNodeList() {
+  const container = $('nodeList');
+  container.innerHTML = '';
+  state.nodes.forEach((node, i) => {
+    const div = document.createElement('div');
+    const isActive = node === state.currentNode;
+    const dotClass = isActive ? 'active' : (i === 0 ? 'backup' : '');
+    div.className = 'node-item';
+    div.innerHTML = `
+      <div class="node-dot ${dotClass}"></div>
+      <div class="node-info">${node.domain || node.node_id} (${node.protocol}) - ${node.region} ${node.isp}</div>
+      <div class="node-latency">P${node.priority || i + 1}</div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function updateStats() {
+  if (!state.connected) return;
+  $('statStatus').textContent = state.activeMode ? '播放中' : '连接中';
+  $('statBuffer').textContent = video.buffered.length > 0 ?
+    (video.buffered.end(video.buffered.length - 1) - video.currentTime).toFixed(1) + 's' : '0s';
+  if (!document.querySelector('#statLatency').textContent || document.querySelector('#statLatency').textContent === '-') {
+    $('statLatency').textContent = state.lastDataTime ? (Date.now() - state.lastDataTime) + 'ms' : '-';
+  }
+  $('statPlaybackRate').textContent = video.playbackRate ? video.playbackRate.toFixed(2) + 'x' : '1.00x';
+}
+
+setInterval(updateStats, 1000);
+
+// ============================================================
+// 播放速率自适应 — P 控制器
+// 人耳对 <6% 速率变化不敏感, 但缓冲水位能稳定在目标附近
+// 端到端延迟波动从 ±500ms 收敛到 ±100ms
+// ============================================================
+function startPlaybackRateControl() {
+  if (state.playbackRateTimer) clearInterval(state.playbackRateTimer);
+
+  const KP = 0.0005;  // P 控制器系数
+  const MIN_RATE = 0.95;
+  const MAX_RATE = 1.05;
+
+  state.playbackRateTimer = setInterval(() => {
+    if (!state.connected || video.paused || video.ended) return;
+    if (!video.buffered || video.buffered.length === 0) return;
+
+    const buffered = video.buffered.end(video.buffered.length - 1) - video.currentTime;
+    const errorMs = (buffered * 1000) - state.targetBufferMs;
+
+    // 误差正: 缓冲过多, 加速追上
+    // 误差负: 缓冲不足, 减速避免空缓冲
+    const rate = 1.0 + Math.max(MIN_RATE - 1, Math.min(MAX_RATE - 1, KP * errorMs));
+    video.playbackRate = Math.max(MIN_RATE, Math.min(MAX_RATE, rate));
+  }, 500);
+}
+
+function stopPlaybackRateControl() {
+  if (state.playbackRateTimer) {
+    clearInterval(state.playbackRateTimer);
+    state.playbackRateTimer = null;
+  }
+  video.playbackRate = 1.0;
+}
+
+// --- 自动播放参数 ---
+(function autoStart() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+  const stream = params.get('stream');
+  const mode = params.get('mode');
+  if (token && stream) {
+    $('tokenInput').value = token;
+    $('streamInput').value = stream;
+    if (mode) $('modeSelect').value = mode;
+    setTimeout(() => window.startPlayback(), 500);
+  }
+})();
+</script>
+</body>
+</html>

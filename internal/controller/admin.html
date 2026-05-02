@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LiveCDN Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f0f17;--card:#16162a;--border:#2a2a4a;--accent:#e94560;--accent2:#4ecca3;--text:#d4d4e8;--dim:#7a7a9a;--warn:#f5a623;--danger:#e94560;--success:#4ecca3;--radius:8px}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;min-height:100vh}
+a{color:var(--accent2);text-decoration:none}
+/* Layout */
+.app{display:flex;min-height:100vh}
+.sidebar{width:220px;background:var(--card);border-right:1px solid var(--border);padding:20px 0;flex-shrink:0;position:fixed;top:0;left:0;bottom:0;overflow-y:auto}
+.sidebar h2{padding:0 20px 16px;font-size:18px;color:var(--accent);border-bottom:1px solid var(--border);margin-bottom:8px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--dim);cursor:pointer;transition:all .2s;font-size:14px;border-left:3px solid transparent}
+.nav-item:hover{color:var(--text);background:rgba(255,255,255,.03)}
+.nav-item.active{color:var(--accent2);background:rgba(78,204,163,.06);border-left-color:var(--accent2)}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+.main{margin-left:220px;flex:1;padding:24px;min-width:0}
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.header h1{font-size:22px;font-weight:600}
+.header-right{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--dim)}
+/* Cards */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px}
+.stat-card .label{font-size:12px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.stat-card .value{font-size:28px;font-weight:700}
+.stat-card .value.green{color:var(--accent2)}
+.stat-card .value.red{color:var(--danger)}
+.stat-card .value.yellow{color:var(--warn)}
+/* Table */
+.panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px;overflow:hidden}
+.panel-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
+.panel-header h3{font-size:15px;font-weight:600}
+.panel-body{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:rgba(0,0,0,.2);padding:10px 14px;text-align:left;font-weight:600;color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+td{padding:10px 14px;border-top:1px solid var(--border);white-space:nowrap}
+tr:hover td{background:rgba(255,255,255,.02)}
+/* Badges */
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-online{background:rgba(78,204,163,.15);color:var(--accent2)}
+.badge-offline{background:rgba(233,69,96,.15);color:var(--danger)}
+.badge-busy{background:rgba(245,166,35,.15);color:var(--warn)}
+.badge-cooling{background:rgba(122,122,154,.15);color:var(--dim)}
+.badge-live{background:rgba(78,204,163,.15);color:var(--accent2)}
+.badge-ended{background:rgba(122,122,154,.15);color:var(--dim)}
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:none;border-radius:6px;font-size:13px;cursor:pointer;transition:all .2s;font-weight:500}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#c73652}
+.btn-success{background:var(--accent2);color:#000}
+.btn-success:hover{background:#3db892}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{border-color:var(--accent2);color:var(--accent2)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-danger:hover{background:#c73652}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+/* Forms */
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;color:var(--dim);margin-bottom:6px}
+.form-control{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;outline:none;transition:border .2s}
+.form-control:focus{border-color:var(--accent2)}
+select.form-control{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%237a7a9a'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.show{opacity:1;pointer-events:auto}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:12px;width:90%;max-width:480px;padding:24px;transform:translateY(20px);transition:transform .2s}
+.modal-overlay.show .modal{transform:translateY(0)}
+.modal h3{margin-bottom:16px;font-size:17px}
+.modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+/* Progress bar */
+.progress{height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
+.progress-bar{height:100%;border-radius:3px;transition:width .3s}
+/* Toast */
+.toast-container{position:fixed;top:20px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 18px;border-radius:8px;font-size:13px;animation:slideIn .3s;min-width:240px;max-width:400px;display:flex;align-items:center;gap:8px}
+.toast-success{background:rgba(78,204,163,.15);border:1px solid rgba(78,204,163,.3);color:var(--accent2)}
+.toast-error{background:rgba(233,69,96,.15);border:1px solid rgba(233,69,96,.3);color:var(--danger)}
+.toast-info{background:rgba(100,100,200,.15);border:1px solid rgba(100,100,200,.3);color:#8888dd}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+/* Login */
+.login-container{display:flex;align-items:center;justify-content:center;min-height:100vh}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px;width:90%;max-width:380px;text-align:center}
+.login-box h1{color:var(--accent);margin-bottom:8px;font-size:24px}
+.login-box p{color:var(--dim);margin-bottom:24px;font-size:14px}
+.login-box .form-group{text-align:left}
+.login-box .btn{width:100%;justify-content:center;padding:10px}
+/* Responsive */
+@media(max-width:768px){
+.sidebar{width:56px;overflow:visible}
+.sidebar h2{display:none}
+.nav-item span{display:none}
+.nav-item{padding:12px 18px;justify-content:center}
+.main{margin-left:56px;padding:16px}
+.stats-grid{grid-template-columns:repeat(2,1fr)}
+}
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+/* Config page */
+.config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.config-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px}
+.config-card h4{font-size:14px;color:var(--accent2);margin-bottom:12px}
+.config-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.config-item:last-child{border-bottom:none}
+.config-item .key{color:var(--dim)}
+.config-item .val{color:var(--text);font-family:monospace}
+/* Live dot */
+.live-dot{width:8px;height:8px;border-radius:50%;display:inline-block;animation:pulse 2s infinite}
+.live-dot.on{background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+.live-dot.off{background:var(--danger);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+/* BW bar inline */
+.bw-bar{width:60px;display:inline-block;vertical-align:middle}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast-container" id="toasts"></div>
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<script>
+// ============================================================
+// LiveCDN Admin Panel — 单文件 SPA
+// ============================================================
+
+const API = '';  // Same origin
+let authToken = localStorage.getItem('livecdn_admin_token') || '';
+
+// --- HTTP Helper ---
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const res = await fetch(API + path, { ...opts, headers });
+  if (res.status === 401) { logout(); throw new Error('unauthorized'); }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+// --- Toast ---
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// --- Modal ---
+function showModal(html) {
+  document.getElementById('modalContent').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('show');
+}
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('show');
+}
+document.getElementById('modalOverlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// --- Auth ---
+function logout() {
+  authToken = '';
+  localStorage.removeItem('livecdn_admin_token');
+  render();
+}
+
+// --- Time format ---
+function timeAgo(t) {
+  if (!t) return '-';
+  const d = new Date(t);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return Math.floor(diff) + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  return d.toLocaleTimeString();
+}
+function fmtTime(t) {
+  if (!t) return '-';
+  return new Date(t).toLocaleString('zh-CN');
+}
+
+// --- BW percentage ---
+function bwPct(used, limit) {
+  if (!limit) return 0;
+  return Math.round(used / limit * 100);
+}
+function bwColor(pct) {
+  if (pct > 80) return 'var(--danger)';
+  if (pct > 50) return 'var(--warn)';
+  return 'var(--accent2)';
+}
+
+// --- Status badge ---
+function statusBadge(s) {
+  const m = { online: 'badge-online', offline: 'badge-offline', busy: 'badge-busy', cooling: 'badge-cooling', pending: 'badge-busy' };
+  const labels = { online: '在线', offline: '离线', busy: '繁忙', cooling: '冷却', pending: '待审批' };
+  return `<span class="badge ${m[s] || 'badge-offline'}">${labels[s] || s || '未知'}</span>`;
+}
+
+// ============================================================
+// Pages
+// ============================================================
+
+let currentPage = 'dashboard';
+let refreshTimer = null;
+
+function navigate(page) {
+  currentPage = page;
+  render();
+}
+
+function render() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  const app = document.getElementById('app');
+  if (!authToken) {
+    app.innerHTML = renderLogin();
+    return;
+  }
+  app.innerHTML = renderLayout();
+  loadPageData();
+  refreshTimer = setInterval(loadPageData, 5000);
+}
+
+// --- Login Page ---
+function renderLogin() {
+  return `
+  <div class="login-container">
+    <div class="login-box">
+      <h1>LiveCDN</h1>
+      <p>管理后台</p>
+      <div class="form-group">
+        <label>管理员令牌</label>
+        <input type="password" class="form-control" id="loginToken" placeholder="Admin Token" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <button class="btn btn-primary" onclick="doLogin()">登录</button>
+    </div>
+  </div>`;
+}
+
+async function doLogin() {
+  const token = document.getElementById('loginToken').value.trim();
+  if (!token) return;
+  try {
+    authToken = token;
+    await api('/api/admin/stats');
+    localStorage.setItem('livecdn_admin_token', token);
+    toast('登录成功', 'success');
+    render();
+  } catch (e) {
+    authToken = '';
+    toast('登录失败: ' + e.message, 'error');
+  }
+}
+
+// --- Layout ---
+function renderLayout() {
+  const nav = [
+    { id: 'dashboard', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>', label: '仪表盘' },
+    { id: 'nodes', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', label: '节点管理' },
+    { id: 'streams', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>', label: '流管理' },
+    { id: 'sessions', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>', label: '会话' },
+    { id: 'config', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', label: '系统配置' },
+  ];
+  const navHTML = nav.map(n => `
+    <div class="nav-item ${currentPage === n.id ? 'active' : ''}" onclick="navigate('${n.id}')">
+      ${n.icon}<span>${n.label}</span>
+    </div>
+  `).join('');
+
+  return `
+  <div class="app">
+    <div class="sidebar">
+      <h2>LiveCDN</h2>
+      ${navHTML}
+      <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--border);margin-top:30px">
+        <div class="nav-item" onclick="logout()" style="padding:8px 0;border:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span>退出</span>
+        </div>
+      </div>
+    </div>
+    <div class="main" id="pageContent">
+      <div style="text-align:center;padding:60px;color:var(--dim)">加载中...</div>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// Page Data Loader
+// ============================================================
+
+let pageData = {};
+
+async function loadPageData() {
+  const container = document.getElementById('pageContent');
+  if (!container) return;
+  try {
+    switch (currentPage) {
+      case 'dashboard': await loadDashboard(container); break;
+      case 'nodes': await loadNodes(container); break;
+      case 'streams': await loadStreams(container); break;
+      case 'sessions': await loadSessions(container); break;
+      case 'config': await loadConfig(container); break;
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') {
+      container.innerHTML = `<div style="text-align:center;padding:60px;color:var(--danger)">加载失败: ${e.message}</div>`;
+    }
+  }
+}
+
+// ============================================================
+// Dashboard
+// ============================================================
+
+async function loadDashboard(el) {
+  const [stats, nodes] = await Promise.all([
+    api('/api/admin/stats'),
+    api('/api/admin/nodes'),
+  ]);
+  pageData.stats = stats;
+  pageData.nodes = nodes.nodes || [];
+
+  const onlineNodes = stats.online_nodes || 0;
+  const totalNodes = stats.total_nodes || 0;
+  const liveStreams = stats.live_streams || 0;
+  const totalUsers = stats.total_users || 0;
+  const bwMbps = stats.total_bw_mbps || 0;
+
+  // Find best/worst nodes
+  const onlineNodeList = (nodes.nodes || []).filter(n => n.status === 'online');
+  const bestNode = onlineNodeList.sort((a, b) => a.rtt - b.rtt)[0];
+  const busyNode = onlineNodeList.sort((a, b) => b.online_users - a.online_users)[0];
+
+  el.innerHTML = `
+  <div class="header">
+    <h1>仪表盘</h1>
+    <div class="header-right">
+      <span class="live-dot ${onlineNodes > 0 ? 'on' : 'off'}"></span>
+      <span>${onlineNodes > 0 ? '系统运行中' : '无在线节点'}</span>
+      <span style="color:var(--dim)">|</span>
+      <span>自动刷新 5s</span>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="label">在线节点</div>
+      <div class="value green">${onlineNodes}<span style="font-size:14px;color:var(--dim)">/${totalNodes}</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="label">活跃直播</div>
+      <div class="value ${liveStreams > 0 ? 'green' : ''}">${liveStreams}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">在线观众</div>
+      <div class="value">${totalUsers}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">总带宽</div>
+      <div class="value yellow">${bwMbps}<span style="font-size:14px;color:var(--dim)"> Mbps</span></div>
+    </div>
+  </div>
+
+  <div class="stats-grid" style="margin-top:-8px">
+    <div class="stat-card">
+      <div class="label">最低延迟节点</div>
+      <div class="value" style="font-size:16px">${bestNode ? bestNode.node_id?.substring(0,8) + ' (' + bestNode.rtt + 'ms)' : '-'}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">最繁忙节点</div>
+      <div class="value" style="font-size:16px">${busyNode ? busyNode.node_id?.substring(0,8) + ' (' + busyNode.online_users + '人)' : '-'}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h3>节点概览</h3>
+      <button class="btn btn-outline btn-sm" onclick="navigate('nodes')">查看全部</button>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead><tr><th>ID</th><th>IP</th><th>地区</th><th>运营商</th><th>用户</th><th>带宽</th><th>RTT</th><th>状态</th></tr></thead>
+        <tbody>
+          ${(nodes.nodes || []).slice(0, 10).map(n => {
+            const pct = bwPct(n.bw_used, n.bw_limit);
+            return `<tr>
+              <td style="font-family:monospace">${n.node_id?.substring(0,8)}</td>
+              <td>${n.public_ip}:${n.port}</td>
+              <td>${n.region}</td>
+              <td>${n.isp}</td>
+              <td>${n.online_users}</td>
+              <td>
+                <div class="bw-bar"><div class="progress" style="height:4px"><div class="progress-bar" style="width:${pct}%;background:${bwColor(pct)}"></div></div></div>
+                <span style="font-size:11px;color:var(--dim)">${pct}%</span>
+              </td>
+              <td>${n.rtt}ms</td>
+              <td>${statusBadge(n.status)}</td>
+            </tr>`;
+          }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:20px">暂无节点</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// Nodes
+// ============================================================
+
+async function loadNodes(el) {
+  const data = await api('/api/admin/nodes');
+  pageData.nodes = data.nodes || [];
+
+  const nodes = data.nodes || [];
+  const online = nodes.filter(n => n.status === 'online').length;
+  const offline = nodes.filter(n => n.status === 'offline').length;
+  const cooling = nodes.filter(n => n.status === 'cooling').length;
+  const pending = nodes.filter(n => n.status === 'pending').length;
+
+  el.innerHTML = `
+  <div class="header">
+    <h1>节点管理</h1>
+    <div class="header-right">
+      <span style="color:var(--accent2)">${online} 在线</span>
+      <span style="color:var(--dim)">|</span>
+      <span style="color:var(--danger)">${offline} 离线</span>
+      ${cooling > 0 ? `<span style="color:var(--dim)">|</span><span style="color:var(--warn)">${cooling} 冷却</span>` : ''}
+      ${pending > 0 ? `<span style="color:var(--dim)">|</span><span style="color:#8888dd">${pending} 待审批</span>` : ''}
+      ${pending > 0 ? `<button class="btn btn-success btn-sm" onclick="approveAllPending()">全部审批</button>` : ''}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h3>全部节点 (${nodes.length})</h3>
+      <div style="display:flex;gap:8px">
+        <input type="text" class="form-control" id="nodeSearch" placeholder="搜索 ID / IP / 地区..." style="width:220px;padding:6px 10px;font-size:12px" oninput="filterNodes()">
+      </div>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead><tr><th>ID</th><th>IP:Port</th><th>域名</th><th>地区</th><th>运营商</th><th>协议</th><th>用户</th><th>带宽</th><th>RTT</th><th>丢包</th><th>状态</th><th>心跳</th><th>操作</th></tr></thead>
+        <tbody id="nodeTableBody">
+          ${renderNodeRows(nodes)}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function renderNodeRows(nodes) {
+  if (!nodes || nodes.length === 0) return '<tr><td colspan="13" style="text-align:center;color:var(--dim);padding:20px">暂无节点</td></tr>';
+  return nodes.map(n => {
+    const pct = bwPct(n.bw_used, n.bw_limit);
+    const lossPct = (n.loss_rate * 100).toFixed(1);
+    return `<tr data-search="${n.node_id} ${n.public_ip} ${n.region} ${n.isp} ${n.domain || ''}">
+      <td style="font-family:monospace;font-size:12px" title="${n.node_id}">${n.node_id?.substring(0,8)}</td>
+      <td style="font-family:monospace;font-size:12px">${n.public_ip}:${n.port}</td>
+      <td style="font-size:12px">${n.domain || '-'}</td>
+      <td>${n.region}</td>
+      <td>${n.isp}</td>
+      <td><span class="badge" style="background:rgba(100,100,200,.15);color:#8888dd">${n.protocol || 'hls'}</span></td>
+      <td>${n.online_users}</td>
+      <td>
+        <div class="bw-bar"><div class="progress" style="height:4px"><div class="progress-bar" style="width:${pct}%;background:${bwColor(pct)}"></div></div></div>
+        <span style="font-size:11px;color:var(--dim)">${pct}%</span>
+      </td>
+      <td>${n.rtt}ms</td>
+      <td style="color:${parseFloat(lossPct) > 3 ? 'var(--danger)' : parseFloat(lossPct) > 1 ? 'var(--warn)' : 'var(--dim)'}">${lossPct}%</td>
+      <td>${statusBadge(n.status)}</td>
+      <td style="font-size:12px;color:var(--dim)">${timeAgo(n.last_heartbeat)}</td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-outline btn-sm" onclick="showNodeDetail('${n.node_id}')" title="详情">i</button>
+          ${n.status === 'pending' ? `<button class="btn btn-success btn-sm" onclick="approveNode('${n.node_id}')" title="审批">审批</button>` : ''}
+          ${n.status === 'online' ? `<button class="btn btn-outline btn-sm" onclick="setNodeStatus('${n.node_id}','offline')" title="下线" style="color:var(--danger)">x</button>` : (n.status !== 'pending' ? `<button class="btn btn-outline btn-sm" onclick="setNodeStatus('${n.node_id}','online')" title="上线" style="color:var(--accent2)">o</button>` : '')}
+          <button class="btn btn-outline btn-sm" onclick="removeNode('${n.node_id}')" title="删除" style="color:var(--danger)">del</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterNodes() {
+  const q = document.getElementById('nodeSearch').value.toLowerCase();
+  const rows = document.querySelectorAll('#nodeTableBody tr');
+  rows.forEach(row => {
+    const text = (row.getAttribute('data-search') || '').toLowerCase();
+    row.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+function showNodeDetail(nodeID) {
+  const node = pageData.nodes.find(n => n.node_id === nodeID);
+  if (!node) return;
+  const pct = bwPct(node.bw_used, node.bw_limit);
+  showModal(`
+    <h3>节点详情</h3>
+    <div style="font-size:13px;line-height:2">
+      <div><span style="color:var(--dim)">ID:</span> <code>${node.node_id}</code></div>
+      <div><span style="color:var(--dim)">IP:</span> ${node.public_ip}:${node.port}</div>
+      <div><span style="color:var(--dim)">域名:</span> ${node.domain || '-'}</div>
+      <div><span style="color:var(--dim)">地区:</span> ${node.region} / ${node.isp}</div>
+      <div><span style="color:var(--dim)">协议:</span> ${node.protocol || 'hls'}${node.tls_enabled ? ' (TLS)' : ''}</div>
+      <div><span style="color:var(--dim)">WS路径:</span> ${node.ws_path || '-'}</div>
+      <div><span style="color:var(--dim)">版本:</span> ${node.version || '-'}</div>
+      <div><span style="color:var(--dim)">在线用户:</span> ${node.online_users}</div>
+      <div><span style="color:var(--dim)">带宽:</span> ${pct}% (${(node.bw_used/1024/1024).toFixed(1)}/${(node.bw_limit/1024/1024).toFixed(1)} MB/s)</div>
+      <div><span style="color:var(--dim)">RTT:</span> ${node.rtt}ms</div>
+      <div><span style="color:var(--dim)">丢包率:</span> ${(node.loss_rate*100).toFixed(2)}%</div>
+      <div><span style="color:var(--dim)">状态:</span> ${statusBadge(node.status)}</div>
+      <div><span style="color:var(--dim)">最后心跳:</span> ${fmtTime(node.last_heartbeat)}</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">关闭</button>
+    </div>
+  `);
+}
+
+async function setNodeStatus(nodeID, status) {
+  try {
+    await api('/api/admin/nodes/' + nodeID + '/status', {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+    toast('节点状态已更新', 'success');
+    loadPageData();
+  } catch (e) {
+    toast('操作失败: ' + e.message, 'error');
+  }
+}
+
+async function removeNode(nodeID) {
+  showModal(`
+    <h3>确认删除节点</h3>
+    <p style="color:var(--dim);font-size:14px;margin-top:8px">确定要移除节点 <code>${nodeID.substring(0,8)}</code> 吗？此操作不可撤销。</p>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-danger" onclick="doRemoveNode('${nodeID}')">确认删除</button>
+    </div>
+  `);
+}
+
+async function doRemoveNode(nodeID) {
+  try {
+    await api('/api/admin/nodes/' + nodeID, { method: 'DELETE' });
+    toast('节点已移除', 'success');
+    closeModal();
+    loadPageData();
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'error');
+  }
+}
+
+async function approveNode(nodeID) {
+  try {
+    await api('/api/admin/nodes/' + nodeID + '/approve', { method: 'POST' });
+    toast('节点已审批通过', 'success');
+    loadPageData();
+  } catch (e) {
+    toast('审批失败: ' + e.message, 'error');
+  }
+}
+
+async function approveAllPending() {
+  const pendingNodes = (pageData.nodes || []).filter(n => n.status === 'pending');
+  let ok = 0, fail = 0;
+  for (const n of pendingNodes) {
+    try {
+      await api('/api/admin/nodes/' + n.node_id + '/approve', { method: 'POST' });
+      ok++;
+    } catch (e) { fail++; }
+  }
+  toast(`审批完成: ${ok} 通过, ${fail} 失败`, ok > 0 ? 'success' : 'error');
+  loadPageData();
+}
+
+// ============================================================
+// Streams
+// ============================================================
+
+async function loadStreams(el) {
+  const [streamsData, stats] = await Promise.all([
+    api('/api/admin/streams'),
+    api('/api/admin/stats'),
+  ]);
+  pageData.streams = streamsData.streams || [];
+
+  el.innerHTML = `
+  <div class="header">
+    <h1>流管理</h1>
+    <div class="header-right">
+      <button class="btn btn-primary" onclick="showStartStreamModal()">开播</button>
+      <button class="btn btn-outline" onclick="triggerKeyRotation()">轮换密钥</button>
+    </div>
+  </div>
+
+  <div class="stats-grid" style="margin-bottom:20px">
+    <div class="stat-card">
+      <div class="label">活跃直播</div>
+      <div class="value green">${stats.live_streams || 0}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">在线观众</div>
+      <div class="value">${stats.total_users || 0}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h3>直播流列表</h3>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead><tr><th>流 Key</th><th>标题</th><th>加密套件</th><th>延迟档位</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody>
+          ${(streamsData.streams || []).map(s => {
+            const modeLabel = {ultra:'极速',standard:'标准',resilient:'抗弱网'}[s.latency_mode] || s.latency_mode || '标准';
+            const modeColor = {ultra:'var(--accent2)',standard:'var(--text)',resilient:'var(--warn)'}[s.latency_mode] || 'var(--dim)';
+            return `<tr>
+            <td style="font-family:monospace;font-size:12px" title="${s.stream_key}">${s.stream_key?.substring(0,12)}...</td>
+            <td>${s.title || '-'}</td>
+            <td><span class="badge" style="background:rgba(100,100,200,.15);color:#8888dd">${s.cipher_suite || '-'}</span></td>
+            <td><span style="color:${modeColor};font-size:12px;font-weight:600">${modeLabel}</span></td>
+            <td>${s.is_live ? '<span class="badge badge-live">LIVE</span>' : '<span class="badge badge-ended">已结束</span>'}</td>
+            <td style="font-size:12px;color:var(--dim)">${fmtTime(s.created_at)}</td>
+            <td>
+              <div style="display:flex;gap:4px">
+                ${s.is_live ? `<button class="btn btn-danger btn-sm" onclick="stopStream('${s.stream_key}')">停播</button>` : ''}
+                ${s.is_live ? `<button class="btn btn-outline btn-sm" onclick="showLatencyModeModal('${s.stream_key}','${s.latency_mode || 'standard'}')">档位</button>` : ''}
+                <button class="btn btn-outline btn-sm" onclick="showStreamDetail('${s.stream_key}')">详情</button>
+              </div>
+            </td>
+          </tr>`;
+          }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:20px">暂无流</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function showStartStreamModal() {
+  showModal(`
+    <h3>开始直播</h3>
+    <div class="form-group">
+      <label>直播标题</label>
+      <input type="text" class="form-control" id="streamTitle" placeholder="输入直播标题">
+    </div>
+    <div class="form-group">
+      <label>延迟档位 <span style="font-size:11px;color:var(--dim)">(默认极速，卡顿自动降档，一般不需手动调)</span></label>
+      <select class="form-control" id="latencyMode">
+        <option value="ultra" selected>极速 (0.8-1.2s) — 默认</option>
+        <option value="standard">标准 (1.5-2.5s) — 卡顿自动降级</option>
+        <option value="resilient">抗弱网 (3-5s) — 严重卡顿自动降级</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-success" onclick="doStartStream()">开始</button>
+    </div>
+  `);
+  setTimeout(() => document.getElementById('streamTitle')?.focus(), 100);
+}
+
+async function doStartStream() {
+  const title = document.getElementById('streamTitle').value.trim() || '未命名直播';
+  const modeSelect = document.getElementById('latencyMode');
+  const latencyMode = modeSelect ? modeSelect.value : 'standard';
+  try {
+    const result = await api('/api/admin/stream/start', {
+      method: 'POST',
+      body: JSON.stringify({ title, access_token: authToken, latency_mode: latencyMode }),
+    });
+    closeModal();
+    showModal(`
+      <h3>直播已创建</h3>
+      <div style="font-size:13px;line-height:2.2">
+        <div><span style="color:var(--dim)">流 Key:</span> <code>${result.stream_key}</code></div>
+        <div><span style="color:var(--dim)">推流地址:</span> <code style="word-break:break-all">${result.push_url}</code></div>
+        <div><span style="color:var(--dim)">HLS 地址:</span> <code style="word-break:break-all">${result.hls_url}</code></div>
+        <div><span style="color:var(--dim)">观众令牌:</span> <code>${result.viewer_token}</code></div>
+      </div>
+      <p style="margin-top:12px;color:var(--warn);font-size:12px">请保存以上信息，关闭后无法再次查看观众令牌。</p>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal();loadPageData()">确定</button>
+      </div>
+    `);
+    toast('直播已开始', 'success');
+  } catch (e) {
+    toast('开播失败: ' + e.message, 'error');
+  }
+}
+
+async function stopStream(streamKey) {
+  showModal(`
+    <h3>确认停播</h3>
+    <p style="color:var(--dim);font-size:14px;margin-top:8px">确定要停止直播 <code>${streamKey.substring(0,8)}</code> 吗？所有观众将断开连接。</p>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-danger" onclick="doStopStream('${streamKey}')">确认停播</button>
+    </div>
+  `);
+}
+
+async function doStopStream(streamKey) {
+  try {
+    await api('/api/admin/stream/stop', {
+      method: 'POST',
+      body: JSON.stringify({ stream_key: streamKey }),
+    });
+    toast('直播已停止', 'success');
+    closeModal();
+    loadPageData();
+  } catch (e) {
+    toast('停播失败: ' + e.message, 'error');
+  }
+}
+
+function showStreamDetail(streamKey) {
+  const stream = pageData.streams.find(s => s.stream_key === streamKey);
+  if (!stream) return;
+  showModal(`
+    <h3>流详情</h3>
+    <div style="font-size:13px;line-height:2">
+      <div><span style="color:var(--dim)">流 Key:</span> <code>${stream.stream_key}</code></div>
+      <div><span style="color:var(--dim)">标题:</span> ${stream.title || '-'}</div>
+      <div><span style="color:var(--dim)">源站 URL:</span> <code style="word-break:break-all">${stream.origin_url}</code></div>
+      <div><span style="color:var(--dim)">加密套件:</span> ${stream.cipher_suite}</div>
+      <div><span style="color:var(--dim)">加密密钥:</span> <code style="font-size:11px">${stream.encrypt_key?.substring(0,16)}...</code></div>
+      <div><span style="color:var(--dim)">加密 IV:</span> <code style="font-size:11px">${stream.encrypt_iv?.substring(0,16)}...</code></div>
+      <div><span style="color:var(--dim)">状态:</span> ${stream.is_live ? '<span class="badge badge-live">LIVE</span>' : '<span class="badge badge-ended">已结束</span>'}</div>
+      <div><span style="color:var(--dim)">创建时间:</span> ${fmtTime(stream.created_at)}</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">关闭</button>
+    </div>
+  `);
+}
+
+async function triggerKeyRotation() {
+  try {
+    await api('/api/admin/keyrotate', { method: 'POST' });
+    toast('密钥轮换已触发', 'success');
+  } catch (e) {
+    toast('轮换失败: ' + e.message, 'error');
+  }
+}
+
+function showLatencyModeModal(streamKey, currentMode) {
+  showModal(`
+    <h3>延迟档位</h3>
+    <p style="color:var(--dim);font-size:12px;margin-bottom:12px;line-height:1.6">
+      系统默认极速模式，卡顿自动降档、恢复后自动升档。<br>
+      手动切换仅用于调试或特殊场景 override。
+    </p>
+    <div class="form-group">
+      <label>选择档位</label>
+      <select class="form-control" id="modeSelect">
+        <option value="ultra" ${currentMode==='ultra'?'selected':''}>极速 (0.8-1.2s) — 默认</option>
+        <option value="standard" ${currentMode==='standard'?'selected':''}>标准 (1.5-2.5s) — 自动降级</option>
+        <option value="resilient" ${currentMode==='resilient'?'selected':''}>抗弱网 (3-5s) — 自动降级</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="doSetLatencyMode('${streamKey}')">确认切换</button>
+    </div>
+  `);
+}
+
+async function doSetLatencyMode(streamKey) {
+  const mode = document.getElementById('modeSelect').value;
+  try {
+    const result = await api('/api/admin/stream/' + streamKey + '/mode', {
+      method: 'PUT',
+      body: JSON.stringify({ mode }),
+    });
+    toast('延迟档位已切换为: ' + mode, 'success');
+    closeModal();
+    loadPageData();
+  } catch (e) {
+    toast('切换失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Sessions
+// ============================================================
+
+async function loadSessions(el) {
+  const data = await api('/api/admin/sessions');
+  pageData.sessions = data.sessions || [];
+
+  el.innerHTML = `
+  <div class="header">
+    <h1>会话管理</h1>
+    <div class="header-right">
+      <span style="color:var(--dim)">活跃会话: ${data.count || 0}</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <h3>全部会话</h3>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead><tr><th>Session ID</th><th>流 Key</th><th>节点</th><th>客户端 IP</th><th>开始时间</th><th>最后活跃</th></tr></thead>
+        <tbody>
+          ${(data.sessions || []).map(s => `<tr>
+            <td style="font-family:monospace;font-size:12px" title="${s.session_id}">${s.session_id?.substring(0,8)}</td>
+            <td style="font-family:monospace;font-size:12px">${s.stream_key?.substring(0,8)}</td>
+            <td style="font-family:monospace;font-size:12px">${s.node_id?.substring(0,8) || '-'}</td>
+            <td style="font-family:monospace;font-size:12px">${s.client_ip || '-'}</td>
+            <td style="font-size:12px;color:var(--dim)">${fmtTime(s.start_time)}</td>
+            <td style="font-size:12px;color:var(--dim)">${timeAgo(s.last_active)}</td>
+          </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:20px">暂无活跃会话</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// Config
+// ============================================================
+
+async function loadConfig(el) {
+  const data = await api('/api/admin/config');
+  pageData.config = data;
+
+  el.innerHTML = `
+  <div class="header">
+    <h1>系统配置</h1>
+    <div class="header-right">
+      <span style="color:var(--dim)">只读视图</span>
+    </div>
+  </div>
+
+  <div class="config-grid">
+    <div class="config-card">
+      <h4>网络配置</h4>
+      <div class="config-item"><span class="key">监听地址</span><span class="val">${data.listen_addr || '-'}</span></div>
+      <div class="config-item"><span class="key">源站地址</span><span class="val">${data.origin_addr || '-'}</span></div>
+    </div>
+    <div class="config-card">
+      <h4>安全配置</h4>
+      <div class="config-item"><span class="key">加密套件</span><span class="val">${data.cipher_suite || '-'}</span></div>
+      <div class="config-item"><span class="key">注册令牌</span><span class="val">${data.reg_token_set ? '已配置' : '<span style="color:var(--danger)">未配置</span>'}</span></div>
+      <div class="config-item"><span class="key">管理员令牌</span><span class="val">${data.admin_token_set ? '已配置' : '<span style="color:var(--danger)">未配置</span>'}</span></div>
+    </div>
+    <div class="config-card">
+      <h4>调度参数</h4>
+      <div class="config-item"><span class="key">心跳超时</span><span class="val">${data.hb_timeout || '-'}s</span></div>
+      <div class="config-item"><span class="key">节点过期清理</span><span class="val">${data.stale_node_timeout || '-'}s</span></div>
+    </div>
+    <div class="config-card">
+      <h4>调度策略说明</h4>
+      <div style="font-size:13px;line-height:1.8;color:var(--dim)">
+        <p><strong style="color:var(--text)">评分公式:</strong> 延迟分 x 负载分 x 质量分</p>
+        <p><strong style="color:var(--text)">地域加分:</strong> 同区同运营商 +20%, 同区 +10%</p>
+        <p><strong style="color:var(--text)">硬阈值:</strong> 带宽>70% / 丢包>5% / 心跳超时 → 剔除</p>
+        <p><strong style="color:var(--text)">会话粘性:</strong> 30min 同节点, 到期强制轮换</p>
+        <p><strong style="color:var(--text)">密钥轮换:</strong> 每10分钟自动轮换</p>
+        <p><strong style="color:var(--text)">投诉冷却:</strong> 5分钟内3次投诉 → 10分钟冷却</p>
+      </div>
+    </div>
+    <div class="config-card">
+      <h4>快捷操作</h4>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+        <button class="btn btn-outline" onclick="triggerKeyRotation()">手动轮换密钥</button>
+        <button class="btn btn-outline" onclick="window.open('/metrics','_blank')">查看 Prometheus 指标</button>
+        <button class="btn btn-outline" onclick="window.open('/status','_blank')">查看状态页</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// Init
+// ============================================================
+render();
+</script>
+</body>
+</html>
