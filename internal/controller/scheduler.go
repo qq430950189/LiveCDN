@@ -31,31 +31,31 @@ import (
 // - 调度时用 effective_weight 而非静态 score, 实现故障降权和慢启动
 type Scheduler struct {
 	store  *MemoryStore
-	geo    *IPLocator  // 只用于客户端 IP 查询
+	geo    *IPLocator // 只用于客户端 IP 查询
 	sticky *StickyStore
 
 	// 异常检测状态 (参考 Envoy Outlier Detection)
-	outlierMu       sync.RWMutex
-	outlierMap      map[string]*outlierState // nodeID → 异常状态
+	outlierMu  sync.RWMutex
+	outlierMap map[string]*outlierState // nodeID → 异常状态
 }
 
 // outlierState 节点异常检测状态 (参考 Envoy OutlierDetection)
 type outlierState struct {
 	consecutiveFails int       // 连续失败计数
-	ejectedUntil    time.Time // 被驱逐到何时 (0=未被驱逐)
-	ejectCount      int       // 历史驱逐次数 (影响恢复时间)
-	lastEjectAt     time.Time // 最近一次驱逐时间
+	ejectedUntil     time.Time // 被驱逐到何时 (0=未被驱逐)
+	ejectCount       int       // 历史驱逐次数 (影响恢复时间)
+	lastEjectAt      time.Time // 最近一次驱逐时间
 }
 
 const (
-	outlierConsecutiveFails = 5                          // 连续失败阈值 (参考 Envoy consecutive_5xx)
-	outlierBaseEjectTime    = 30 * time.Second           // 基础驱逐时间 (参考 Envoy base_ejection_time)
-	outlierMaxEjectTime     = 300 * time.Second          // 最大驱逐时间 (5分钟)
-	outlierMaxEjectPercent  = 0.3                         // 最大驱逐比例 30% (参考 Envoy max_ejection_percent)
+	outlierConsecutiveFails = 5                 // 连续失败阈值 (参考 Envoy consecutive_5xx)
+	outlierBaseEjectTime    = 30 * time.Second  // 基础驱逐时间 (参考 Envoy base_ejection_time)
+	outlierMaxEjectTime     = 300 * time.Second // 最大驱逐时间 (5分钟)
+	outlierMaxEjectPercent  = 0.3               // 最大驱逐比例 30% (参考 Envoy max_ejection_percent)
 
 	// 动态权重参数 (参考 Nginx effective_weight)
-	weightDecayOnFail   = 0.5   // 失败时权重衰减系数 (effective_weight *= decay)
-	weightRecoverStep   = 0.1   // 成功时权重恢复步长 (effective_weight += step, 上限1.0)
+	weightDecayOnFail = 0.5 // 失败时权重衰减系数 (effective_weight *= decay)
+	weightRecoverStep = 0.1 // 成功时权重恢复步长 (effective_weight += step, 上限1.0)
 )
 
 func NewScheduler(store *MemoryStore) *Scheduler {
@@ -134,6 +134,7 @@ func (s *Scheduler) Dispatch(streamKey, clientIP, clientRegion, clientISP string
 	endpoints := make([]common.NodeEndpoint, 0, len(selected))
 	for i, node := range selected {
 		ep := common.NodeEndpoint{
+			NodeID:          node.NodeID,
 			Domain:          node.Domain,
 			Port:            node.Port,
 			Protocol:        node.Protocol,
@@ -173,6 +174,7 @@ func (s *Scheduler) dispatchWithSticky(stickyNode *common.NodeInfo, clientRegion
 	endpoints := make([]common.NodeEndpoint, 0, len(result))
 	for i, node := range result {
 		ep := common.NodeEndpoint{
+			NodeID:          node.NodeID,
 			Domain:          node.Domain,
 			Port:            node.Port,
 			Protocol:        node.Protocol,

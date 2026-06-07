@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	bolt "go.etcd.io/bbolt"
 	"github.com/user/live-cdn/internal/common"
+	bolt "go.etcd.io/bbolt"
 )
 
 // Store 接口 — MemoryStore 和 BoltStore 实现统一接口
@@ -21,8 +21,8 @@ var (
 
 // BoltStore 基于 bbolt 的持久化存储
 type BoltStore struct {
-	db    *bolt.DB
-	mem   *MemoryStore // 内存缓存, 所有读操作走内存
+	db     *bolt.DB
+	mem    *MemoryStore // 内存缓存, 所有读操作走内存
 	dbPath string
 }
 
@@ -243,6 +243,14 @@ func (bs *BoltStore) GetSession(id string) (*common.SessionInfo, bool) {
 
 func (bs *BoltStore) RemoveSession(id string) {
 	bs.mem.RemoveSession(id)
+}
+
+func (bs *BoltStore) TouchSession(id string) bool {
+	return bs.mem.TouchSession(id)
+}
+
+func (bs *BoltStore) RemoveStaleSessions(timeout time.Duration) int {
+	return bs.mem.RemoveStaleSessions(timeout)
 }
 
 func (bs *BoltStore) GetAllSessions() []*common.SessionInfo {
