@@ -890,7 +890,7 @@ async fn register_with_controller(config: &Config) -> Result<(), String> {
         cascade_upstream: config.is_cascade_node(),
     };
 
-    let url = format!("{}/api/agent/register", config.controller_url);
+    let url = config.controller_api_url("/api/agent/register");
     let resp = client.post(&url)
         .json(&reg)
         .timeout(std::time::Duration::from_secs(10))
@@ -911,6 +911,7 @@ async fn heartbeat_loop(state: Arc<AppState>) {
     let mut interval = tokio::time::interval(
         std::time::Duration::from_secs(state.config.hb_interval_secs)
     );
+    let client = reqwest::Client::new();
 
     loop {
         interval.tick().await;
@@ -954,10 +955,16 @@ async fn heartbeat_loop(state: Arc<AppState>) {
             stream_lag_ms: 0,    // TODO: 从 FlvPuller 的 origin_ts 计算
         };
 
-        let client = reqwest::Client::new();
-        let url = format!("{}/api/agent/heartbeat", state.config.controller_url);
+        let url = state.config.controller_api_url("/api/agent/heartbeat");
 
-        match client.post(&url).json(&hb).timeout(std::time::Duration::from_secs(5)).send().await {
+        match client
+            .post(&url)
+            .bearer_auth(&state.config.reg_token)
+            .json(&hb)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 // 解析心跳响应中的 mesh_map (Controller 控制拓扑 + Agent 本地择优)
                 if let Ok(body) = resp.text().await {
@@ -972,7 +979,14 @@ async fn heartbeat_loop(state: Arc<AppState>) {
                 debug!("心跳上报成功");
             }
             Ok(resp) => {
-                warn!("心跳返回异常: {}", resp.status());
+                let status = resp.status();
+                warn!("心跳返回异常: {}", status);
+                if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+                    warn!("Controller 不认识当前节点，尝试重新注册");
+                    if let Err(e) = register_with_controller(&state.config).await {
+                        warn!("重新注册失败: {}", e);
+                    }
+                }
             }
             Err(e) => {
                 warn!("心跳上报失败: {}", e);

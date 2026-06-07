@@ -57,6 +57,7 @@ services:
     environment:
       - CONTROLLER_LISTEN=:8080
       - ORIGIN_ADDR=http://origin:8080
+      - RTMP_ORIGIN_ADDR=origin:1935
       - BACKUP_ORIGIN_ADDR=http://origin-backup:8090
     depends_on:
       - origin
