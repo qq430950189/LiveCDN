@@ -327,3 +327,21 @@ func TestPendingNodeNotHealthy(t *testing.T) {
 		t.Errorf("approved node should be healthy, got %d", len(healthy))
 	}
 }
+
+func TestRemoveStaleSessions(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Now()
+	store.CreateSession(&common.SessionInfo{SessionID: "fresh", LastActive: now})
+	store.CreateSession(&common.SessionInfo{SessionID: "stale", LastActive: now.Add(-2 * time.Minute)})
+
+	removed := store.RemoveStaleSessions(time.Minute)
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, ok := store.GetSession("fresh"); !ok {
+		t.Fatal("fresh session should remain")
+	}
+	if _, ok := store.GetSession("stale"); ok {
+		t.Fatal("stale session should be removed")
+	}
+}

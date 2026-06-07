@@ -291,7 +291,7 @@ impl CascadeSelector {
     fn select_from_candidates(
         &self,
         candidates: &[CandidateUpstream],
-        resp: &MeshMapResponse,
+        _resp: &MeshMapResponse,
     ) -> Option<CascadePath> {
         if candidates.is_empty() {
             return None;
@@ -339,14 +339,13 @@ impl CascadeSelector {
 
             let final_score = (c.score_hint * 0.7 + local_score * 100.0 * 0.3) / 100.0;
 
-            let mut reason = String::new();
-            if c.region == self.region && c.isp == self.isp {
-                reason = "同区同ISP".into();
+            let mut reason = if c.region == self.region && c.isp == self.isp {
+                "同区同ISP".to_string()
             } else if c.region == self.region {
-                reason = "同区".into();
+                "同区".to_string()
             } else {
-                reason = "跨区".into();
-            }
+                "跨区".to_string()
+            };
 
             // IPv6 优先
             let upstream_url = if self.has_ipv6 && !c.ipv6_url.is_empty() {

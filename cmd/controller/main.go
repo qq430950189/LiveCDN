@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/user/live-cdn/internal/controller"
 	"gopkg.in/yaml.v3"
@@ -30,15 +31,18 @@ func loadConfig(path string) (*controller.Config, error) {
 	if err != nil {
 		// Use defaults
 		log.Printf("Config file not found (%s), using defaults", path)
-		return &controller.Config{
+		cfg := &controller.Config{
 			ListenAddr:       ":8080",
 			OriginAddr:       "http://origin:8080",
+			RTMPOriginAddr:   "origin:1935",
 			RegToken:         "change-me-reg-token",
 			AdminToken:       "change-me-admin-token",
-			CipherSuite:      "chacha20",
+			CipherSuite:      "chacha20-poly1305",
 			HBTimeout:        15,
 			StaleNodeTimeout: 120,
-		}, nil
+		}
+		applyEnvOverrides(cfg)
+		return cfg, nil
 	}
 
 	cfg := &controller.Config{}
@@ -50,8 +54,14 @@ func loadConfig(path string) (*controller.Config, error) {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = ":8080"
 	}
+	if cfg.OriginAddr == "" {
+		cfg.OriginAddr = "http://origin:8080"
+	}
+	if cfg.RTMPOriginAddr == "" {
+		cfg.RTMPOriginAddr = "origin:1935"
+	}
 	if cfg.CipherSuite == "" {
-		cfg.CipherSuite = "chacha20"
+		cfg.CipherSuite = "chacha20-poly1305"
 	}
 	if cfg.HBTimeout == 0 {
 		cfg.HBTimeout = 15
@@ -60,5 +70,37 @@ func loadConfig(path string) (*controller.Config, error) {
 		cfg.StaleNodeTimeout = 120
 	}
 
+	applyEnvOverrides(cfg)
 	return cfg, nil
+}
+
+func applyEnvOverrides(cfg *controller.Config) {
+	if v := os.Getenv("CONTROLLER_LISTEN"); v != "" {
+		cfg.ListenAddr = v
+	}
+	if v := os.Getenv("ORIGIN_ADDR"); v != "" {
+		cfg.OriginAddr = v
+	}
+	if v := os.Getenv("RTMP_ORIGIN_ADDR"); v != "" {
+		cfg.RTMPOriginAddr = v
+	}
+	if v := os.Getenv("REG_TOKEN"); v != "" {
+		cfg.RegToken = v
+	}
+	if v := os.Getenv("ADMIN_TOKEN"); v != "" {
+		cfg.AdminToken = v
+	}
+	if v := os.Getenv("CIPHER_SUITE"); v != "" {
+		cfg.CipherSuite = v
+	}
+	if v := os.Getenv("HB_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.HBTimeout = n
+		}
+	}
+	if v := os.Getenv("STALE_NODE_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.StaleNodeTimeout = n
+		}
+	}
 }

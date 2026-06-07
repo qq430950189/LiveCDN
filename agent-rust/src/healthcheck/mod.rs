@@ -2,9 +2,8 @@
 //! 挂机宝节点会"偷偷出问题但不报错"——磁盘满、时钟漂移、DNS 抽风、内存压力
 //! 每 60s 跑一次自检, 异常立刻上报 Controller, 由 Controller 决定是否摘除
 
-use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{debug, info, warn};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{debug, warn};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,7 +119,6 @@ fn check_disk_free() -> u64 {
 fn nix_statvfs() -> Result<u64, ()> {
     // 简化: 直接读 /proc 来代替 statvfs syscall
     // 生产环境应该用 libc::statvfs
-    use std::ffi::CStr;
     let path = b".\0";
     let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
     let result = unsafe {

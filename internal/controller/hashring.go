@@ -23,8 +23,8 @@ import (
 //  4. 如果哈希节点不健康，fallback 到加权随机
 type ConsistentHashScheduler struct {
 	store           *MemoryStore
-	virtualReplicas int           // 每个物理节点的虚拟节点数
-	fallback        *Scheduler   // fallback 到加权随机
+	virtualReplicas int        // 每个物理节点的虚拟节点数
+	fallback        *Scheduler // fallback 到加权随机
 }
 
 func NewConsistentHashScheduler(store *MemoryStore) *ConsistentHashScheduler {
@@ -46,6 +46,7 @@ func (chs *ConsistentHashScheduler) Dispatch(streamKey, clientIP, clientRegion, 
 	if len(healthyNodes) == 1 {
 		node := healthyNodes[0]
 		ep := common.NodeEndpoint{
+			NodeID:          node.NodeID,
 			URL:             buildNodeURL(node),
 			FLVURL:          buildNodeFLVURL(node),
 			HLSURL:          buildNodeHLSURL(node),
@@ -111,6 +112,7 @@ func (chs *ConsistentHashScheduler) Dispatch(streamKey, clientIP, clientRegion, 
 
 	if primary, ok := nodeMap[primaryID]; ok {
 		ep := common.NodeEndpoint{
+			NodeID:          primary.NodeID,
 			URL:             buildNodeURL(primary),
 			FLVURL:          buildNodeFLVURL(primary),
 			HLSURL:          buildNodeHLSURL(primary),
@@ -130,6 +132,7 @@ func (chs *ConsistentHashScheduler) Dispatch(streamKey, clientIP, clientRegion, 
 	for i, bid := range backupIDs {
 		if backup, ok := nodeMap[bid]; ok {
 			ep := common.NodeEndpoint{
+				NodeID:          backup.NodeID,
 				URL:             buildNodeURL(backup),
 				FLVURL:          buildNodeFLVURL(backup),
 				HLSURL:          buildNodeHLSURL(backup),

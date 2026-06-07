@@ -11,9 +11,4 @@
 // 重新导出 registry 中的所有公共类型
 pub mod registry;
 
-// 兼容性重新导出 — 现有代码使用的类型
-pub use registry::{
-    TransportType, TransportConfig, TransportConn, TransportError,
-    TransportSwitchCommand, SecurityLayer,
-    global_registry, dial_transport,
-};
+// registry 模块保留可插拔传输实现，当前二进制入口暂不需要重新导出。

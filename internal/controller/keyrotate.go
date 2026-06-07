@@ -13,9 +13,9 @@ const keyRotationInterval = 10 * time.Minute
 
 // KeyRotator 管理直播流的密钥轮换
 type KeyRotator struct {
-	store    *MemoryStore
-	mu       sync.Mutex
-	stopCh   chan struct{}
+	store  *MemoryStore
+	mu     sync.Mutex
+	stopCh chan struct{}
 }
 
 func NewKeyRotator(store *MemoryStore) *KeyRotator {
@@ -62,9 +62,10 @@ func (kr *KeyRotator) RotateAllLiveStreams() {
 		}
 
 		// 生成新密钥
-		suite := crypto.CipherSuite(stream.CipherSuite)
-		if suite == "" {
-			suite = crypto.CipherChaCha20
+		suite, err := crypto.NormalizeCipherSuite(stream.CipherSuite)
+		if err != nil {
+			log.Error().Err(err).Str("stream", stream.StreamKey[:8]).Msg("key rotation skipped: unsupported cipher")
+			continue
 		}
 
 		keyInfo, err := crypto.GenerateKey(suite)
