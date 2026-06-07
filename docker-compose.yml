@@ -12,8 +12,6 @@
 # - systemd 管理
 # - 无需 Docker / 无需运行时 / 静态链接
 
-version: "3.8"
-
 services:
   # 主源站 - SRS
   origin:
@@ -57,6 +55,7 @@ services:
     environment:
       - CONTROLLER_LISTEN=:8080
       - ORIGIN_ADDR=http://origin:8080
+      - RTMP_ORIGIN_ADDR=origin:1935
       - BACKUP_ORIGIN_ADDR=http://origin-backup:8090
     depends_on:
       - origin

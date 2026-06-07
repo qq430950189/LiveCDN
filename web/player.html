@@ -120,6 +120,10 @@ const state = {
   controllerURL: '',
   playbackRateTimer: null,    // playbackRate P控制器
   targetBufferMs: 1000,       // 由档位下发, 极速300/标准1000/抗弱网3000
+  playbackRateMin: 0.95,
+  playbackRateMax: 1.05,
+  stallEvents: 0,
+  qualitySamples: 0,
 };
 
 const $ = id => document.getElementById(id);
@@ -135,6 +139,19 @@ function log(msg, level = 'info') {
   panel.appendChild(line);
   panel.scrollTop = panel.scrollHeight;
   if (panel.children.length > 200) panel.removeChild(panel.firstChild);
+}
+
+function apiURL(path) {
+  const base = (state.controllerURL || window.location.origin).replace(/\/+$/, '');
+  return `${base}${path.startsWith('/') ? path : '/' + path}`;
+}
+
+function applyLatencyConfig(conf) {
+  if (!conf) return;
+  if (Number.isFinite(conf.client_buffer_ms)) state.targetBufferMs = conf.client_buffer_ms;
+  if (Number.isFinite(conf.playback_rate_min)) state.playbackRateMin = conf.playback_rate_min;
+  if (Number.isFinite(conf.playback_rate_max)) state.playbackRateMax = conf.playback_rate_max;
+  log(`延迟档位参数: buffer=${state.targetBufferMs}ms rate=${state.playbackRateMin}-${state.playbackRateMax}`);
 }
 
 // --- 协议能力检测 ---
@@ -507,7 +524,7 @@ async function playWSEncrypted(nodeUrl) {
 // 调度请求
 // ============================================================
 async function requestDispatch() {
-  const resp = await fetch(state.controllerURL + '/api/player/dispatch', {
+  const resp = await fetch(apiURL('/api/player/dispatch'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ stream_key: state.streamKey, token: state.token, client_ip: '' })
@@ -553,6 +570,7 @@ window.startPlayback = async function() {
     const data = await requestDispatch();
     state.nodes = data.nodes || [];
     state.sessionID = data.session_id;
+    applyLatencyConfig(data.latency_conf);
 
     if (data.encrypt_key) {
       decryptor = new StreamDecryptor(data.encrypt_key, data.cipher_suite || 'aes-128-gcm');
@@ -581,7 +599,7 @@ window.startPlayback = async function() {
     // 按模式播放
     switch (mode) {
       case 'http-flv': {
-        const flvUrl = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}.flv`;
+        const flvUrl = node.flv_url || `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}.flv`;
         try {
           playHTTP_FLV(flvUrl);
           playSuccess = true;
@@ -601,7 +619,7 @@ window.startPlayback = async function() {
         break;
       }
       case 'hls': {
-        const hlsUrl = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}/stream.m3u8`;
+        const hlsUrl = node.hls_url || `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}/stream.m3u8`;
         try {
           playLLHLS(hlsUrl);
           playSuccess = true;
@@ -626,7 +644,7 @@ window.startPlayback = async function() {
     if (!playSuccess && mode !== 'hls') {
       log('尝试降级到 LL-HLS...', 'warn');
       try {
-        const hlsUrl = `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}/stream.m3u8`;
+        const hlsUrl = node.hls_url || `${window.location.protocol === 'https:' ? 'https:' : 'http:'}//${baseUrl}/live/${streamKey}/stream.m3u8`;
         playLLHLS(hlsUrl);
         playSuccess = true;
       } catch (e2) {
@@ -658,10 +676,11 @@ window.startPlayback = async function() {
     startPlaybackRateControl();
 
     // 质量上报
+    state.stallEvents = 0;
+    state.qualitySamples = 0;
     state.qualityReportTimer = setInterval(() => {
       if (state.currentNode && state.sessionID) {
-        const stallRate = video.paused ? 0.5 : 0;
-        reportQuality(state.currentNode, stallRate, '');
+        reportQuality(state.currentNode, computeAndResetStallRate(), '');
       }
     }, 30000);
 
@@ -677,6 +696,7 @@ window.startPlayback = async function() {
 };
 
 window.stopPlayback = function() {
+  const sessionToEnd = state.sessionID;
   state.connected = false;
 
   // 关闭 mpegts.js
@@ -698,7 +718,12 @@ window.stopPlayback = function() {
   if (state.mediaSource && state.mediaSource.readyState === 'open') {
     state.mediaSource.endOfStream();
   }
-  if (state.qualityReportTimer) clearInterval(state.qualityReportTimer);
+  if (state.qualityReportTimer) {
+    clearInterval(state.qualityReportTimer);
+    state.qualityReportTimer = null;
+  }
+  endSession(sessionToEnd);
+  state.sessionID = '';
 
   // 停止播放速率自适应
   stopPlaybackRateControl();
@@ -724,18 +749,52 @@ window.stopPlayback = function() {
 // --- 质量上报 ---
 function reportQuality(node, stallRate, error) {
   if (!node || !state.sessionID) return;
-  fetch(state.controllerURL + '/api/player/report', {
+  fetch(apiURL('/api/player/report'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       session_id: state.sessionID,
-      node_id: node.domain,
+      node_id: node.node_id || node.domain || '',
       stall_rate: stallRate,
-      e2e_latency_ms: state.lastDataTime ? Date.now() - state.lastDataTime : 0,
+      rtt: 0,
+      e2e_latency: state.lastDataTime ? Date.now() - state.lastDataTime : 0,
       error: error || ''
     })
+  }).then(async resp => {
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.config) applyLatencyConfig(data.config);
+    if (data.latency_mode) log(`质量上报完成, 当前档位: ${data.latency_mode}${data.downgraded ? ' (已降级)' : ''}`);
   }).catch(() => {});
 }
+
+function computeAndResetStallRate() {
+  const samples = Math.max(1, state.qualitySamples || 1);
+  const rate = Math.min(1, state.stallEvents / samples);
+  state.stallEvents = 0;
+  state.qualitySamples = 0;
+  return rate;
+}
+
+function endSession(sessionID) {
+  if (!sessionID) return;
+  const payload = JSON.stringify({ session_id: sessionID });
+  const url = apiURL('/api/player/session/end');
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+    return;
+  }
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
+}
+
+video.addEventListener('waiting', () => { state.stallEvents++; });
+video.addEventListener('stalled', () => { state.stallEvents++; });
+video.addEventListener('error', () => {
+  const err = video.error ? `media_error_${video.error.code}` : 'media_error';
+  if (state.currentNode && state.sessionID) reportQuality(state.currentNode, 1, err);
+});
+setInterval(() => { if (state.connected) state.qualitySamples++; }, 1000);
+window.addEventListener('beforeunload', () => endSession(state.sessionID));
 
 // --- UI ---
 function updateNodeList() {
@@ -777,8 +836,8 @@ function startPlaybackRateControl() {
   if (state.playbackRateTimer) clearInterval(state.playbackRateTimer);
 
   const KP = 0.0005;  // P 控制器系数
-  const MIN_RATE = 0.95;
-  const MAX_RATE = 1.05;
+  const MIN_RATE = state.playbackRateMin || 0.95;
+  const MAX_RATE = state.playbackRateMax || 1.05;
 
   state.playbackRateTimer = setInterval(() => {
     if (!state.connected || video.paused || video.ended) return;

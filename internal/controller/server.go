@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -18,7 +20,8 @@ import (
 // Config holds controller configuration
 type Config struct {
 	ListenAddr       string   `yaml:"listen_addr"`
-	OriginAddr       string   `yaml:"origin_addr"`
+	OriginAddr       string   `yaml:"origin_addr"`      // HTTP origin base URL for HLS/HTTP-FLV
+	RTMPOriginAddr   string   `yaml:"rtmp_origin_addr"` // RTMP host[:port] used in broadcaster push URLs
 	RegToken         string   `yaml:"reg_token"`
 	AdminToken       string   `yaml:"admin_token"`
 	CipherSuite      string   `yaml:"cipher_suite"`
@@ -29,17 +32,18 @@ type Config struct {
 
 // Server is the controller HTTP server
 type Server struct {
-	cfg              *Config
-	store            *MemoryStore
-	scheduler        *Scheduler
-	router           *gin.Engine
-	tokenSg          *crypto.TokenSigner
-	metrics          *Metrics
-	latencyCtrl      *LatencyController
-	audit            *AuditLogger
+	cfg         *Config
+	store       *MemoryStore
+	scheduler   *Scheduler
+	router      *gin.Engine
+	tokenSg     *crypto.TokenSigner
+	metrics     *Metrics
+	latencyCtrl *LatencyController
+	audit       *AuditLogger
 }
 
 func NewServer(cfg *Config) *Server {
+	applyConfigDefaults(cfg)
 	gin.SetMode(gin.ReleaseMode)
 	store := NewMemoryStore()
 	scheduler := NewScheduler(store)
@@ -98,6 +102,7 @@ func (s *Server) setupRoutes() {
 	{
 		agent.POST("/register", s.handleRegister)
 		agent.POST("/heartbeat", s.handleHeartbeat)
+		agent.GET("/streams/:key", s.handleAgentGetStream)
 	}
 
 	// === Player API ===
@@ -105,6 +110,7 @@ func (s *Server) setupRoutes() {
 	{
 		player.POST("/dispatch", s.handleDispatch)
 		player.POST("/report", s.handleQualityReport)
+		player.POST("/session/end", s.handleEndSession)
 		player.GET("/key", s.handleGetKey)
 	}
 
@@ -250,15 +256,57 @@ func (s *Server) handleRegister(c *gin.Context) {
 		fmt.Sprintf("ip=%s region=%s isp=%s status=%s", req.PublicIP, req.Region, req.ISP, status), nil)
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":       "ok",
-		"node_status":  status,
-		"origin_addr":  s.cfg.OriginAddr,
-		"hb_interval":  5,
-		"cipher_suite": s.cfg.CipherSuite,
+		"status":           "ok",
+		"node_status":      status,
+		"origin_addr":      s.cfg.OriginAddr,
+		"rtmp_origin_addr": s.cfg.RTMPOriginAddr,
+		"hb_interval":      5,
+		"cipher_suite":     s.cfg.CipherSuite,
 	})
 }
 
+func (s *Server) handleAgentGetStream(c *gin.Context) {
+	if !s.validateAgentToken(c) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid agent token"})
+		return
+	}
+
+	streamKey := c.Param("key")
+	stream, ok := s.store.GetStream(streamKey)
+	if !ok || !stream.IsLive {
+		c.JSON(http.StatusNotFound, gin.H{"error": "stream not found or offline"})
+		return
+	}
+
+	c.JSON(http.StatusOK, stream)
+}
+
+func (s *Server) validateAgentToken(c *gin.Context) bool {
+	expected := s.cfg.RegToken
+	if expected == "" {
+		return false
+	}
+
+	token := c.GetHeader("X-LiveCDN-Token")
+	if token == "" {
+		auth := c.GetHeader("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			token = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		}
+	}
+	if token == "" {
+		token = c.Query("token")
+	}
+
+	return subtle.ConstantTimeCompare([]byte(token), []byte(expected)) == 1
+}
+
 func (s *Server) handleHeartbeat(c *gin.Context) {
+	if !s.validateAgentToken(c) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid agent token"})
+		return
+	}
+
 	var req common.HeartbeatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -277,8 +325,8 @@ func (s *Server) handleHeartbeat(c *gin.Context) {
 	meshResp := s.buildMeshMapResponse(req.NodeID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"mesh_map":  meshResp,
+		"status":   "ok",
+		"mesh_map": meshResp,
 	})
 }
 
@@ -331,9 +379,14 @@ func (s *Server) handleDispatch(c *gin.Context) {
 
 	// Create session
 	sessionID := uuid.New().String()
+	primaryNodeID := ""
+	if len(result.Nodes) > 0 {
+		primaryNodeID = result.Nodes[0].NodeID
+	}
 	s.store.CreateSession(&common.SessionInfo{
 		SessionID:  sessionID,
 		StreamKey:  streamKey,
+		NodeID:     primaryNodeID,
 		ClientIP:   req.ClientIP,
 		StartTime:  time.Now(),
 		LastActive: time.Now(),
@@ -367,19 +420,31 @@ func (s *Server) handleQualityReport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.SessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+		return
+	}
+	if !s.store.TouchSession(req.SessionID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	s.metrics.QualityReported.Add(1)
 
 	if req.StallRate > 0.1 || req.Error != "" {
-		s.store.RecordComplaint(req.NodeID)
-		s.metrics.QualityReported.Add(1)
+		if req.NodeID != "" {
+			s.store.RecordComplaint(req.NodeID)
+		}
 		log.Warn().
-			Str("node", req.NodeID[:8]).
+			Str("node", truncate(req.NodeID, 8)).
 			Float64("stall", req.StallRate).
 			Str("error", req.Error).
 			Msg("quality complaint")
 
 		// 异常检测 (参考 Envoy Outlier Detection): 质量差 → 报告节点失败
-		s.scheduler.ReportNodeFail(req.NodeID)
-	} else if req.StallRate < 0.01 && req.RTT > 0 {
+		if req.NodeID != "" {
+			s.scheduler.ReportNodeFail(req.NodeID)
+		}
+	} else if req.StallRate < 0.01 && req.RTT > 0 && req.NodeID != "" {
 		// 正常质量 → 报告节点成功 (慢恢复 effective_weight)
 		s.scheduler.ReportNodeSuccess(req.NodeID)
 	}
@@ -393,6 +458,18 @@ func (s *Server) handleQualityReport(c *gin.Context) {
 		"downgraded":   downgraded,
 		"config":       common.LatencyModeConfigs[newMode],
 	})
+}
+
+func (s *Server) handleEndSession(c *gin.Context) {
+	var req struct {
+		SessionID string `json:"session_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s.store.RemoveSession(req.SessionID)
+	c.JSON(http.StatusOK, gin.H{"status": "ended"})
 }
 
 func (s *Server) handleGetKey(c *gin.Context) {
@@ -465,9 +542,10 @@ func (s *Server) handleStreamStart(c *gin.Context) {
 	streamKey := common.GenerateStreamKey()
 	viewerToken := common.GenerateToken()
 
-	suite := crypto.CipherSuite(s.cfg.CipherSuite)
-	if suite == "" {
-		suite = crypto.CipherChaCha20
+	suite, err := crypto.NormalizeCipherSuite(s.cfg.CipherSuite)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 	keyInfo, err := crypto.GenerateKey(suite)
 	if err != nil {
@@ -478,10 +556,11 @@ func (s *Server) handleStreamStart(c *gin.Context) {
 
 	encKey, encIV := keyInfo.KeyToBase64()
 
+	hlsURL := s.hlsURL(streamKey)
 	stream := &common.StreamInfo{
 		StreamKey:   streamKey,
 		Title:       req.Title,
-		OriginURL:   s.cfg.OriginAddr + "/live/" + streamKey,
+		OriginURL:   hlsURL,
 		EncryptKey:  encKey,
 		EncryptIV:   encIV,
 		CipherSuite: string(suite),
@@ -495,8 +574,7 @@ func (s *Server) handleStreamStart(c *gin.Context) {
 	s.store.CreateStream(stream)
 	s.store.SetToken(viewerToken, streamKey)
 
-	pushURL := "rtmp://" + s.cfg.OriginAddr + "/live/" + streamKey
-	hlsURL := s.cfg.OriginAddr + "/live/" + streamKey + "/stream.m3u8"
+	pushURL := s.rtmpPushURL(streamKey)
 
 	log.Info().
 		Str("key", streamKey[:8]).
@@ -617,6 +695,7 @@ func (s *Server) handleGetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"listen_addr":        s.cfg.ListenAddr,
 		"origin_addr":        s.cfg.OriginAddr,
+		"rtmp_origin_addr":   s.cfg.RTMPOriginAddr,
 		"cipher_suite":       s.cfg.CipherSuite,
 		"hb_timeout":         s.cfg.HBTimeout,
 		"stale_node_timeout": s.cfg.StaleNodeTimeout,
@@ -636,9 +715,10 @@ func (s *Server) handleAdminStreamStart(c *gin.Context) {
 	streamKey := common.GenerateStreamKey()
 	viewerToken := common.GenerateToken()
 
-	suite := crypto.CipherSuite(s.cfg.CipherSuite)
-	if suite == "" {
-		suite = crypto.CipherChaCha20
+	suite, err := crypto.NormalizeCipherSuite(s.cfg.CipherSuite)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 	keyInfo, err := crypto.GenerateKey(suite)
 	if err != nil {
@@ -648,10 +728,11 @@ func (s *Server) handleAdminStreamStart(c *gin.Context) {
 
 	encKey, encIV := keyInfo.KeyToBase64()
 
+	hlsURL := s.hlsURL(streamKey)
 	stream := &common.StreamInfo{
 		StreamKey:   streamKey,
 		Title:       req.Title,
-		OriginURL:   s.cfg.OriginAddr + "/live/" + streamKey,
+		OriginURL:   hlsURL,
 		EncryptKey:  encKey,
 		EncryptIV:   encIV,
 		CipherSuite: string(suite),
@@ -666,8 +747,7 @@ func (s *Server) handleAdminStreamStart(c *gin.Context) {
 	s.store.SetToken(viewerToken, streamKey)
 	s.metrics.StreamStartTotal.Add(1)
 
-	pushURL := "rtmp://" + s.cfg.OriginAddr + "/live/" + streamKey
-	hlsURL := s.cfg.OriginAddr + "/live/" + streamKey + "/stream.m3u8"
+	pushURL := s.rtmpPushURL(streamKey)
 
 	log.Info().Str("key", streamKey[:8]).Str("title", req.Title).Msg("stream started by admin")
 	s.audit.Log(AuditStreamStart, "admin", streamKey, fmt.Sprintf("title=%s cipher=%s", req.Title, string(suite)), nil)
@@ -1014,6 +1094,11 @@ func (s *Server) cleanupLoop() {
 			log.Info().Int("removed", removed).Msg("cleaned up stale nodes")
 		}
 
+		removedSessions := s.store.RemoveStaleSessions(90 * time.Second)
+		if removedSessions > 0 {
+			log.Info().Int("removed", removedSessions).Msg("cleaned up stale player sessions")
+		}
+
 		// 异常检测恢复 (参考 Envoy: 驱逐到期自动恢复)
 		s.scheduler.RecoverOutliers()
 
@@ -1028,6 +1113,53 @@ func (s *Server) cleanupLoop() {
 			}
 		}
 	}
+}
+
+func applyConfigDefaults(cfg *Config) {
+	if cfg.ListenAddr == "" {
+		cfg.ListenAddr = ":8080"
+	}
+	if cfg.OriginAddr == "" {
+		cfg.OriginAddr = "http://origin:8080"
+	}
+	if cfg.RTMPOriginAddr == "" {
+		cfg.RTMPOriginAddr = deriveRTMPOriginAddr(cfg.OriginAddr)
+	}
+	if suite, err := crypto.NormalizeCipherSuite(cfg.CipherSuite); err == nil {
+		cfg.CipherSuite = string(suite)
+	}
+	if cfg.CipherSuite == "" {
+		cfg.CipherSuite = string(crypto.CipherChaCha20)
+	}
+	if cfg.HBTimeout == 0 {
+		cfg.HBTimeout = 15
+	}
+	if cfg.StaleNodeTimeout == 0 {
+		cfg.StaleNodeTimeout = 120
+	}
+}
+
+func deriveRTMPOriginAddr(originAddr string) string {
+	addr := strings.TrimSpace(originAddr)
+	addr = strings.TrimPrefix(addr, "http://")
+	addr = strings.TrimPrefix(addr, "https://")
+	addr = strings.TrimSuffix(addr, "/")
+	if host, _, ok := strings.Cut(addr, ":"); ok && host != "" {
+		return host + ":1935"
+	}
+	return addr + ":1935"
+}
+
+func (s *Server) hlsURL(streamKey string) string {
+	base := strings.TrimRight(s.cfg.OriginAddr, "/")
+	return base + "/live/" + streamKey + "/stream.m3u8"
+}
+
+func (s *Server) rtmpPushURL(streamKey string) string {
+	base := strings.TrimSpace(s.cfg.RTMPOriginAddr)
+	base = strings.TrimPrefix(base, "rtmp://")
+	base = strings.TrimRight(base, "/")
+	return "rtmp://" + base + "/live/" + streamKey
 }
 
 // Run starts the HTTP server
@@ -1069,8 +1201,8 @@ func (s *Server) handleAuditIntegrity(c *gin.Context) {
 	tampered := s.audit.VerifyIntegrity()
 	c.JSON(http.StatusOK, gin.H{
 		"total_entries": s.audit.Count(),
-		"tampered":     tampered,
-		"intact":       tampered == 0,
+		"tampered":      tampered,
+		"intact":        tampered == 0,
 	})
 }
 
