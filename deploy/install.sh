@@ -40,6 +40,15 @@ done
 
 [[ -z "$TOKEN" ]] && error "必须提供 --token 参数"
 [[ -z "$CONTROLLER_URL" ]] && error "必须提供 --controller 参数"
+CONTROLLER_URL="${CONTROLLER_URL%/}"
+
+if [[ $(id -u) -eq 0 ]]; then
+  SUDO=""
+elif command -v sudo &>/dev/null; then
+  SUDO="sudo"
+else
+  error "当前用户不是 root，且系统未安装 sudo；请用 root 执行安装脚本"
+fi
 
 # --- 系统检测 ---
 info "检测系统环境..."
@@ -47,7 +56,7 @@ ARCH=$(uname -m)
 case "$ARCH" in
   x86_64|amd64) BINARY_ARCH="x86_64" ;;
   aarch64|arm64) BINARY_ARCH="aarch64" ;;
-  armv7l)       BINARY_ARCH="armv7" ;;
+  armv7l)       error "当前发布脚本暂未生成 armv7 musl 二进制，请改用 x86_64/aarch64 节点或自行交叉编译" ;;
   *)            error "不支持的架构: $ARCH" ;;
 esac
 
@@ -70,7 +79,7 @@ INSTALL_DIR="/opt/livecdn"
 CONFIG_DIR="/etc/livecdn"
 BINARY_PATH="$INSTALL_DIR/livecdn-agent"
 
-sudo mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
+$SUDO mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
 
 # --- 下载 Agent 二进制 ---
 # musl 静态链接，不依赖任何系统库，直接下载即用
@@ -80,11 +89,11 @@ info "下载 Agent 二进制 (musl 静态链接, 零依赖)..."
 
 DOWNLOAD_OK=0
 if command -v curl &>/dev/null; then
-  if sudo curl -fSL --connect-timeout 10 --max-time 120 -o "$BINARY_PATH" "$BINARY_URL" 2>/dev/null; then
+  if $SUDO curl -fSL --connect-timeout 10 --max-time 120 -o "$BINARY_PATH" "$BINARY_URL" 2>/dev/null; then
     DOWNLOAD_OK=1
   fi
 elif command -v wget &>/dev/null; then
-  if sudo wget --timeout=120 -O "$BINARY_PATH" "$BINARY_URL" 2>/dev/null; then
+  if $SUDO wget --timeout=120 -O "$BINARY_PATH" "$BINARY_URL" 2>/dev/null; then
     DOWNLOAD_OK=1
   fi
 fi
@@ -97,7 +106,7 @@ if [[ $DOWNLOAD_OK -eq 0 ]]; then
   3. 网络连通"
 fi
 
-sudo chmod +x "$BINARY_PATH"
+$SUDO chmod +x "$BINARY_PATH"
 
 # 验证二进制
 BINARY_SIZE=$(du -h "$BINARY_PATH" | cut -f1)
@@ -141,7 +150,7 @@ info "地区: $REGION | 运营商: $ISP"
 CONFIG_PATH="$CONFIG_DIR/agent.toml"
 info "生成配置: $CONFIG_PATH"
 
-cat > "$CONFIG_PATH" <<EOF
+$SUDO tee "$CONFIG_PATH" > /dev/null <<EOF
 # LiveCDN Agent 配置 - 由 install.sh 自动生成
 # 部署方式: 裸机运行 (无 Docker)
 # 二进制: musl 静态链接，零系统依赖
@@ -167,7 +176,7 @@ EOF
 # --- systemd 服务 ---
 info "创建 systemd 服务..."
 
-sudo tee /etc/systemd/system/livecdn-agent.service > /dev/null <<EOF
+$SUDO tee /etc/systemd/system/livecdn-agent.service > /dev/null <<EOF
 [Unit]
 Description=LiveCDN Edge Agent
 After=network-online.target
@@ -200,17 +209,17 @@ SyslogIdentifier=livecdn-agent
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable livecdn-agent
-sudo systemctl start livecdn-agent
+$SUDO systemctl daemon-reload
+$SUDO systemctl enable livecdn-agent
+$SUDO systemctl start livecdn-agent
 
 # --- 等待启动 ---
 info "等待启动..."
 sleep 2
 
-if sudo systemctl is-active --quiet livecdn-agent; then
+if $SUDO systemctl is-active --quiet livecdn-agent; then
   # 检查内存占用
-  AGENT_PID=$(systemctl show livecdn-agent --property=MainPID --value 2>/dev/null || echo "0")
+  AGENT_PID=$($SUDO systemctl show livecdn-agent --property=MainPID --value 2>/dev/null || echo "0")
   AGENT_RSS=""
   if [[ "$AGENT_PID" != "0" ]]; then
     AGENT_RSS=$(ps -o rss= -p "$AGENT_PID" 2>/dev/null | awk '{printf "%.1fMB", $1/1024}' || echo "unknown")

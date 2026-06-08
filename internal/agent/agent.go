@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,10 +94,10 @@ func (a *AgentService) setupRoutes() {
 	r := a.router
 
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		MaxAge:           12 * time.Hour,
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Authorization"},
+		MaxAge:       12 * time.Hour,
 	}))
 	r.Use(gin.Recovery())
 
@@ -274,19 +276,40 @@ func (a *AgentService) getRelay(streamKey string) *StreamRelay {
 }
 
 func (a *AgentService) fetchStreamInfo(streamKey string) (*common.StreamInfo, error) {
-	// In production, this would query the controller API
-	// For now, construct from known origin address
-	originAddr := "http://origin:8080"
-	if a.cfg.ControllerURL != "" {
-		originAddr = a.cfg.ControllerURL
+	if a.cfg.ControllerURL == "" {
+		return nil, fmt.Errorf("controller_url is required")
 	}
-	return &common.StreamInfo{
-		StreamKey:   streamKey,
-		OriginURL:   fmt.Sprintf("%s/live/%s/stream.m3u8", originAddr, streamKey),
-		EncryptKey:  "",
-		CipherSuite: "chacha20-poly1305",
-		IsLive:      true,
-	}, nil
+
+	endpoint, err := a.controllerAPIURL("/api/agent/streams/" + url.PathEscape(streamKey))
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	if a.cfg.RegToken != "" {
+		req.Header.Set("Authorization", "Bearer "+a.cfg.RegToken)
+	}
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch stream info: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch stream info returned status %d", resp.StatusCode)
+	}
+
+	var streamInfo common.StreamInfo
+	if err := json.NewDecoder(resp.Body).Decode(&streamInfo); err != nil {
+		return nil, fmt.Errorf("decode stream info: %w", err)
+	}
+	if streamInfo.StreamKey == "" {
+		streamInfo.StreamKey = streamKey
+	}
+	return &streamInfo, nil
 }
 
 // --- Heartbeat ---
@@ -317,15 +340,59 @@ func (a *AgentService) heartbeatLoop() {
 			LossRate:    0,
 		}
 
-		jsonData, _ := json.Marshal(hb)
-		url := fmt.Sprintf("%s/api/agent/heartbeat", a.cfg.ControllerURL)
-		resp, err := a.httpClient.Post(url, "application/json", bytes.NewReader(jsonData))
+		status, err := a.sendHeartbeat(&hb)
 		if err != nil {
 			log.Printf("[Agent] Heartbeat failed: %v", err)
 			continue
 		}
-		resp.Body.Close()
+		if status == http.StatusNotFound || status == http.StatusGone {
+			log.Printf("[Agent] Controller does not know node %s (status=%d), retrying registration", a.cfg.NodeID, status)
+			if err := a.RegisterWithController(); err != nil {
+				log.Printf("[Agent] Registration retry failed: %v", err)
+			}
+			continue
+		}
+		if status >= 400 {
+			log.Printf("[Agent] Heartbeat returned status %d", status)
+		}
 	}
+}
+
+func (a *AgentService) sendHeartbeat(hb *common.HeartbeatRequest) (int, error) {
+	jsonData, err := json.Marshal(hb)
+	if err != nil {
+		return 0, err
+	}
+	endpoint, err := a.controllerAPIURL("/api/agent/heartbeat")
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(jsonData))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if a.cfg.RegToken != "" {
+		req.Header.Set("Authorization", "Bearer "+a.cfg.RegToken)
+	}
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+func (a *AgentService) controllerAPIURL(path string) (string, error) {
+	base := strings.TrimRight(a.cfg.ControllerURL, "/")
+	if base == "" {
+		return "", fmt.Errorf("controller_url is required")
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return base + path, nil
 }
 
 // RegisterWithController registers this agent with the controller
@@ -349,8 +416,11 @@ func (a *AgentService) RegisterWithController() error {
 		return err
 	}
 
-	url := fmt.Sprintf("%s/api/agent/register", a.cfg.ControllerURL)
-	resp, err := a.httpClient.Post(url, "application/json", bytes.NewReader(jsonData))
+	endpoint, err := a.controllerAPIURL("/api/agent/register")
+	if err != nil {
+		return err
+	}
+	resp, err := a.httpClient.Post(endpoint, "application/json", bytes.NewReader(jsonData))
 	if err != nil {
 		return fmt.Errorf("register failed: %w", err)
 	}
