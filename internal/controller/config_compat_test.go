@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func TestApplyConfigDefaultsNormalizesCompatibilityValues(t *testing.T) {
 		CipherSuite: "chacha20",
 	}
 
+	ApplyConfigDefaults(cfg)
 	applyConfigDefaults(cfg)
 
 	if cfg.ListenAddr != ":8080" {
@@ -221,5 +223,70 @@ func TestPlayerQualityReportRejectsUnknownSession(t *testing.T) {
 	s.router.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("quality report status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestInstallAndDownloadRoutesServeConfiguredFiles(t *testing.T) {
+	dir := t.TempDir()
+	installPath := dir + "/install.sh"
+	binaryDir := dir + "/binaries"
+	if err := os.Mkdir(binaryDir, 0o755); err != nil {
+		t.Fatalf("mkdir binary dir: %v", err)
+	}
+	if err := os.WriteFile(installPath, []byte("#!/bin/bash\necho install\n"), 0o755); err != nil {
+		t.Fatalf("write install script: %v", err)
+	}
+	binaryName := "livecdn-agent-x86_64-unknown-linux-musl"
+	if err := os.WriteFile(binaryDir+"/"+binaryName, []byte("agent-binary"), 0o755); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+
+	s := NewServer(&Config{
+		ListenAddr:        ":0",
+		OriginAddr:        "http://origin:8080",
+		AdminToken:        "admin-token",
+		RegToken:          "reg-token",
+		BinaryDir:         binaryDir,
+		InstallScriptPath: installPath,
+	})
+
+	installReq := httptest.NewRequest(http.MethodGet, "/install.sh", nil)
+	installResp := httptest.NewRecorder()
+	s.router.ServeHTTP(installResp, installReq)
+	if installResp.Code != http.StatusOK {
+		t.Fatalf("install.sh status = %d, body = %s", installResp.Code, installResp.Body.String())
+	}
+	if !strings.Contains(installResp.Body.String(), "echo install") {
+		t.Fatalf("install script body not served: %q", installResp.Body.String())
+	}
+
+	binaryReq := httptest.NewRequest(http.MethodGet, "/downloads/"+binaryName, nil)
+	binaryResp := httptest.NewRecorder()
+	s.router.ServeHTTP(binaryResp, binaryReq)
+	if binaryResp.Code != http.StatusOK {
+		t.Fatalf("binary status = %d, body = %s", binaryResp.Code, binaryResp.Body.String())
+	}
+	if binaryResp.Body.String() != "agent-binary" {
+		t.Fatalf("binary body = %q", binaryResp.Body.String())
+	}
+
+	badReq := httptest.NewRequest(http.MethodGet, "/downloads/../secret", nil)
+	badResp := httptest.NewRecorder()
+	s.router.ServeHTTP(badResp, badReq)
+	if badResp.Code != http.StatusBadRequest && badResp.Code != http.StatusNotFound {
+		t.Fatalf("path traversal status = %d, want bad request or not found", badResp.Code)
+	}
+}
+
+func TestOnPublishHandlesShortStreamNames(t *testing.T) {
+	s := NewServer(&Config{ListenAddr: ":0", OriginAddr: "http://origin:8080", RegToken: "reg", AdminToken: "admin"})
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks/on_publish", bytes.NewBufferString(`{"stream":"a"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 }

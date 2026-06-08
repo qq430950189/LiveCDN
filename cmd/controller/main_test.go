@@ -14,6 +14,8 @@ func TestLoadConfigAppliesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("CIPHER_SUITE", "aes128")
 	t.Setenv("HB_TIMEOUT", "9")
 	t.Setenv("STALE_NODE_TIMEOUT", "33")
+	t.Setenv("BINARY_DIR", "/srv/livecdn/binaries")
+	t.Setenv("INSTALL_SCRIPT_PATH", "/srv/livecdn/install.sh")
 
 	path := t.TempDir() + "/controller.yaml"
 	if err := os.WriteFile(path, []byte("listen_addr: ':8080'\norigin_addr: 'http://origin:8080'\nreg_token: yaml-reg\nadmin_token: yaml-admin\n"), 0o600); err != nil {
@@ -33,5 +35,8 @@ func TestLoadConfigAppliesEnvironmentOverrides(t *testing.T) {
 	}
 	if cfg.CipherSuite != "aes128" || cfg.HBTimeout != 9 || cfg.StaleNodeTimeout != 33 {
 		t.Fatalf("environment scalar overrides not applied: %+v", cfg)
+	}
+	if cfg.BinaryDir != "/srv/livecdn/binaries" || cfg.InstallScriptPath != "/srv/livecdn/install.sh" {
+		t.Fatalf("environment static asset overrides not applied: %+v", cfg)
 	}
 }

@@ -50,13 +50,17 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./configs/controller.yaml:/app/configs/controller.yaml
+      - ./configs/controller.yaml:/app/configs/controller.yaml:ro
+      - ./binaries:/app/binaries:ro  # Agent 二进制下载目录 (/downloads/*)
+      - ./deploy/install.sh:/app/deploy/install.sh:ro  # 一键安装脚本 (/install.sh)
       - controller-data:/app/data   # bbolt 持久化目录
     environment:
       - CONTROLLER_LISTEN=:8080
       - ORIGIN_ADDR=http://origin:8080
       - RTMP_ORIGIN_ADDR=origin:1935
       - BACKUP_ORIGIN_ADDR=http://origin-backup:8090
+      - BINARY_DIR=/app/binaries
+      - INSTALL_SCRIPT_PATH=/app/deploy/install.sh
     depends_on:
       - origin
     networks:

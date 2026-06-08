@@ -14,3 +14,7 @@ stale_node_timeout: 120               # 失效节点清理(秒)
 #   - cdn1.example.com
 #   - cdn2.example.com
 #   - img-cdn.example.com
+
+# Agent 安装资源发布路径 (Controller 容器内路径)
+binary_dir: "./binaries"
+install_script_path: "./deploy/install.sh"

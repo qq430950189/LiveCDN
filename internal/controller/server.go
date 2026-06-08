@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +21,17 @@ import (
 
 // Config holds controller configuration
 type Config struct {
+	ListenAddr        string   `yaml:"listen_addr"`
+	OriginAddr        string   `yaml:"origin_addr"`      // HTTP origin base URL for HLS/HTTP-FLV
+	RTMPOriginAddr    string   `yaml:"rtmp_origin_addr"` // RTMP host[:port] used in broadcaster push URLs
+	RegToken          string   `yaml:"reg_token"`
+	AdminToken        string   `yaml:"admin_token"`
+	CipherSuite       string   `yaml:"cipher_suite"`
+	HBTimeout         int      `yaml:"hb_timeout"`
+	StaleNodeTimeout  int      `yaml:"stale_node_timeout"`
+	DomainPool        []string `yaml:"domain_pool"`         // 域名切换池: 多域名轮询 + 秒级切换
+	BinaryDir         string   `yaml:"binary_dir"`          // Agent 二进制发布目录
+	InstallScriptPath string   `yaml:"install_script_path"` // 一键安装脚本路径
 	ListenAddr       string   `yaml:"listen_addr"`
 	OriginAddr       string   `yaml:"origin_addr"`      // HTTP origin base URL for HLS/HTTP-FLV
 	RTMPOriginAddr   string   `yaml:"rtmp_origin_addr"` // RTMP host[:port] used in broadcaster push URLs
@@ -43,6 +56,7 @@ type Server struct {
 }
 
 func NewServer(cfg *Config) *Server {
+	ApplyConfigDefaults(cfg)
 	applyConfigDefaults(cfg)
 	gin.SetMode(gin.ReleaseMode)
 	store := NewMemoryStore()
@@ -87,7 +101,8 @@ func (s *Server) setupRoutes() {
 	}))
 	r.Use(gin.Recovery())
 
-	// === 下载 Agent 二进制 ===
+	// === Agent 安装脚本与二进制下载 ===
+	r.GET("/install.sh", s.handleInstallScript)
 	r.GET("/downloads/:filename", s.handleDownloadBinary)
 
 	// === SRS 推流鉴权钩子 ===
@@ -174,12 +189,12 @@ func (s *Server) handleOnPublish(c *gin.Context) {
 	// 检查 stream_key 对应的流是否存在且 live
 	stream, ok := s.store.GetStream(req.Stream)
 	if !ok || !stream.IsLive {
-		log.Warn().Str("stream", req.Stream[:8]).Msg("on_publish rejected: stream not found or not live")
+		log.Warn().Str("stream", shortLogID(req.Stream)).Msg("on_publish rejected: stream not found or not live")
 		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "stream not authorized"})
 		return
 	}
 
-	log.Info().Str("stream", req.Stream[:8]).Str("ip", req.IP).Msg("on_publish approved")
+	log.Info().Str("stream", shortLogID(req.Stream)).Str("ip", req.IP).Msg("on_publish approved")
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 
@@ -188,30 +203,60 @@ func (s *Server) handleOnUnpublish(c *gin.Context) {
 		Stream string `json:"stream"`
 	}
 	c.ShouldBindJSON(&req)
-	log.Info().Str("stream", req.Stream[:8]).Msg("on_unpublish")
+	log.Info().Str("stream", shortLogID(req.Stream)).Msg("on_unpublish")
 	c.JSON(http.StatusOK, gin.H{"code": 0})
 }
 
-// --- Binary Download ---
+// --- Agent install script and binary download ---
+
+func (s *Server) handleInstallScript(c *gin.Context) {
+	path := filepath.Clean(s.cfg.InstallScriptPath)
+	if path == "." || path == string(filepath.Separator) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "install script is not configured"})
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "install script not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stat install script"})
+		return
+	}
+	c.Header("Content-Type", "text/x-shellscript; charset=utf-8")
+	c.File(path)
+}
 
 func (s *Server) handleDownloadBinary(c *gin.Context) {
 	filename := c.Param("filename")
-
-	// 安全检查: 只允许 livecdn-agent-* 格式，禁止路径遍历
-	if len(filename) < 15 || filename[:14] != "livecdn-agent-" {
+	if !validAgentBinaryName(filename) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid filename"})
 		return
 	}
-	for _, ch := range filename {
-		if ch == '/' || ch == '\\' {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid filename"})
+
+	filePath := filepath.Join(s.cfg.BinaryDir, filename)
+	if _, err := os.Stat(filePath); err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent binary not found"})
 			return
 		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stat agent binary"})
+		return
 	}
-
-	// 从 ./binaries/ 目录提供预编译的二进制
-	filePath := "./binaries/" + filename
 	c.File(filePath)
+}
+
+func validAgentBinaryName(filename string) bool {
+	if filename != filepath.Base(filename) {
+		return false
+	}
+	if !strings.HasPrefix(filename, "livecdn-agent-") {
+		return false
+	}
+	if strings.ContainsAny(filename, `/\`) {
+		return false
+	}
+	return strings.HasSuffix(filename, "-unknown-linux-musl")
 }
 
 // --- Agent Handlers ---
@@ -1115,6 +1160,8 @@ func (s *Server) cleanupLoop() {
 	}
 }
 
+// ApplyConfigDefaults fills backward-compatible defaults for optional controller settings.
+func ApplyConfigDefaults(cfg *Config) {
 func applyConfigDefaults(cfg *Config) {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = ":8080"
@@ -1137,6 +1184,19 @@ func applyConfigDefaults(cfg *Config) {
 	if cfg.StaleNodeTimeout == 0 {
 		cfg.StaleNodeTimeout = 120
 	}
+	if cfg.BinaryDir == "" {
+		cfg.BinaryDir = "./binaries"
+	}
+	if cfg.InstallScriptPath == "" {
+		cfg.InstallScriptPath = "./deploy/install.sh"
+	}
+}
+
+func shortLogID(value string) string {
+	if len(value) <= 8 {
+		return value
+	}
+	return value[:8]
 }
 
 func deriveRTMPOriginAddr(originAddr string) string {
