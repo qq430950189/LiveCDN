@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/user/live-cdn/internal/common"
@@ -33,29 +34,29 @@ import (
 
 // CandidateUpstream Controller 为 Agent 推荐的候选上游
 type CandidateUpstream struct {
-	NodeID         string  `json:"node_id"`          // 上游Agent ID
-	URL            string  `json:"url"`              // 级联拉流地址 (含/cascade/路径)
-	Region         string  `json:"region"`           // 地域
-	ISP            string  `json:"isp"`              // 运营商
-	Tier           int     `json:"tier"`             // 上游层级 (必须 < 自己的层级)
-	ScoreHint      float64 `json:"score_hint"`       // Controller 评分提示 (0~100)
-	MaxChildren    int     `json:"max_children"`     // 最大下游数
-	CurrentChildren int   `json:"current_children"` // 当前下游数
-	BWRemainingMbps float64 `json:"bw_remaining_mbps"` // 剩余级联带宽 (Mbps)
-	AllowCascade   bool    `json:"allow_cascade"`    // 仍允许级联
-	HasIPv6        bool    `json:"has_ipv6"`         // 是否有IPv6
-	IPv6URL        string  `json:"ipv6_url,omitempty"` // IPv6级联地址
+	NodeID          string  `json:"node_id"`            // 上游Agent ID
+	URL             string  `json:"url"`                // 级联拉流地址 (含/cascade/路径)
+	Region          string  `json:"region"`             // 地域
+	ISP             string  `json:"isp"`                // 运营商
+	Tier            int     `json:"tier"`               // 上游层级 (必须 < 自己的层级)
+	ScoreHint       float64 `json:"score_hint"`         // Controller 评分提示 (0~100)
+	MaxChildren     int     `json:"max_children"`       // 最大下游数
+	CurrentChildren int     `json:"current_children"`   // 当前下游数
+	BWRemainingMbps float64 `json:"bw_remaining_mbps"`  // 剩余级联带宽 (Mbps)
+	AllowCascade    bool    `json:"allow_cascade"`      // 仍允许级联
+	HasIPv6         bool    `json:"has_ipv6"`           // 是否有IPv6
+	IPv6URL         string  `json:"ipv6_url,omitempty"` // IPv6级联地址
 }
 
 // MeshPolicy Controller 下发的切换策略
 type MeshPolicy struct {
-	MaxDepth              int `json:"max_depth"`                // 最大级联深度, 默认2
-	SwitchCooldownSec     int `json:"switch_cooldown_sec"`      // 切换冷却时间(秒), 默认30
-	MinScoreImprovement   int `json:"min_score_improvement"`    // 最低改善分数才切换, 默认15
-	MeshPingIntervalSec   int `json:"mesh_ping_interval_sec"`   // Mesh Ping 间隔(秒), 默认10
-	CandidateTTLSec       int `json:"candidate_ttl_sec"`        // 候选列表TTL(秒), 默认60
-	MaxSwitchPer5Min      int `json:"max_switch_per_5min"`      // 5分钟内最大切换次数, 默认3
-	HardFailTimeoutMs     int `json:"hard_fail_timeout_ms"`     // 上游硬故障超时(ms), 默认3000
+	MaxDepth            int `json:"max_depth"`              // 最大级联深度, 默认2
+	SwitchCooldownSec   int `json:"switch_cooldown_sec"`    // 切换冷却时间(秒), 默认30
+	MinScoreImprovement int `json:"min_score_improvement"`  // 最低改善分数才切换, 默认15
+	MeshPingIntervalSec int `json:"mesh_ping_interval_sec"` // Mesh Ping 间隔(秒), 默认10
+	CandidateTTLSec     int `json:"candidate_ttl_sec"`      // 候选列表TTL(秒), 默认60
+	MaxSwitchPer5Min    int `json:"max_switch_per_5min"`    // 5分钟内最大切换次数, 默认3
+	HardFailTimeoutMs   int `json:"hard_fail_timeout_ms"`   // 上游硬故障超时(ms), 默认3000
 }
 
 // OriginFallback Origin 回退配置
@@ -67,32 +68,32 @@ type OriginFallback struct {
 // MeshMapResponse 心跳响应中的 Mesh 拓扑信息
 // 类似 Tailscale MapResponse, 但只包含当前 Agent 的候选上游
 type MeshMapResponse struct {
-	MeshEpoch          uint64              `json:"mesh_epoch"`           // 拓扑版本号
-	SelfNodeID         string              `json:"self_node_id"`         // 本节点ID
-	SelfTier           int                 `json:"self_tier"`            // 本节点层级
-	CandidateUpstreams []CandidateUpstream `json:"candidate_upstreams"`  // 候选上游列表
-	OriginFallback     OriginFallback      `json:"origin_fallback"`      // Origin回退
-	Policy             MeshPolicy          `json:"policy"`               // 切换策略
+	MeshEpoch          uint64              `json:"mesh_epoch"`                 // 拓扑版本号
+	SelfNodeID         string              `json:"self_node_id"`               // 本节点ID
+	SelfTier           int                 `json:"self_tier"`                  // 本节点层级
+	CandidateUpstreams []CandidateUpstream `json:"candidate_upstreams"`        // 候选上游列表
+	OriginFallback     OriginFallback      `json:"origin_fallback"`            // Origin回退
+	Policy             MeshPolicy          `json:"policy"`                     // 切换策略
 	MigrationAdvice    *MigrationAdvice    `json:"migration_advice,omitempty"` // 迁移建议
 }
 
 // MigrationAdvice Controller 下发的迁移建议
 type MigrationAdvice struct {
-	ShouldSwitch  bool   `json:"should_switch"`   // 是否应该切换
-	PreferredNode string `json:"preferred_node"`  // 建议切换到的节点ID
-	Reason        string `json:"reason"`          // 原因: parent_overloaded / topology_rebalance / ...
+	ShouldSwitch  bool   `json:"should_switch"`  // 是否应该切换
+	PreferredNode string `json:"preferred_node"` // 建议切换到的节点ID
+	Reason        string `json:"reason"`         // 原因: parent_overloaded / topology_rebalance / ...
 }
 
 // DefaultMeshPolicy 默认切换策略
 func DefaultMeshPolicy() MeshPolicy {
 	return MeshPolicy{
-		MaxDepth:              2,
-		SwitchCooldownSec:     30,
-		MinScoreImprovement:   15,
-		MeshPingIntervalSec:   10,
-		CandidateTTLSec:       60,
-		MaxSwitchPer5Min:      3,
-		HardFailTimeoutMs:     3000,
+		MaxDepth:            2,
+		SwitchCooldownSec:   30,
+		MinScoreImprovement: 15,
+		MeshPingIntervalSec: 10,
+		CandidateTTLSec:     60,
+		MaxSwitchPer5Min:    3,
+		HardFailTimeoutMs:   3000,
 	}
 }
 
@@ -152,7 +153,7 @@ func (s *Server) buildMeshMapResponse(requesterID string) *MeshMapResponse {
 	}
 
 	// Origin 回退
-	originURL := fmt.Sprintf("%s/live/{stream_key}.flv", s.cfg.OriginAddr)
+	originURL := fmt.Sprintf("%s/live/{stream_key}.flv", strings.TrimRight(s.cfg.OriginAddr, "/"))
 
 	// 检查是否需要迁移建议
 	migration := s.checkMigrationAdvice(requester, candidates)
@@ -167,7 +168,7 @@ func (s *Server) buildMeshMapResponse(requesterID string) *MeshMapResponse {
 			Priority: 999,
 		},
 		Policy:          DefaultMeshPolicy(),
-		MigrationAdvice:  migration,
+		MigrationAdvice: migration,
 	}
 }
 
@@ -274,9 +275,10 @@ func buildIPv6CascadeURL(node *common.NodeInfo) string {
 
 // meshNodeScoreV2 综合评分 (0~1)
 // 改进版 (参考 Tailscale betterAddr + Envoy ORCA):
-//   6 维评分, Controller 给 hint, Agent 本地测速后加 latency 维度
 //
-//   score = 0.25*locality + 0.20*isp + 0.15*capacity + 0.15*stability + 0.10*ipv6 + 0.15*topology
+//	6 维评分, Controller 给 hint, Agent 本地测速后加 latency 维度
+//
+//	score = 0.25*locality + 0.20*isp + 0.15*capacity + 0.15*stability + 0.10*ipv6 + 0.15*topology
 //
 // 新增 topology 维度 (参考 Tailscale betterAddr):
 //   - 同机房 +30% (PrivateIP, 拓扑最近)
