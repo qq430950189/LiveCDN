@@ -18,9 +18,10 @@
 //!   data[1] = AAC packet type (仅 sound_format==10 时)
 //!     0=AAC sequence header, 1=AAC raw data
 
+#[cfg(test)]
 use bytes::Bytes;
 use std::collections::VecDeque;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::flv::{FlvTagPacket, FlvTagType};
 
@@ -482,7 +483,7 @@ mod tests {
         });
 
         // 添加 3 个 GOP (超出 gop_count=2)
-        for i in 0..3 {
+        for _ in 0..3 {
             cache.add_tag(make_video_tag(1, 7, 1, b"idr")); // keyframe
             cache.add_tag(make_video_tag(2, 7, 1, b"p"));   // P-frame
         }
