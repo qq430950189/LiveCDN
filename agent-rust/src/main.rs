@@ -3,6 +3,7 @@
 //! 
 //! 技术栈: Rust + Tokio + Hyper + Ring
 //! 目标: <10MB RSS, <2% CPU idle
+#![allow(dead_code)] // 传输协议/加密兼容层中保留了待启用的公共能力，避免二进制 crate 将其误报为 dead_code。
 
 mod config;
 mod crypto;
@@ -43,8 +44,77 @@ struct AppState {
     cascade_selector: CascadeSelector,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum CliAction {
+    Run { config_path: String },
+    Version,
+}
+
+fn parse_cli_args<I, S>(args: I) -> Result<CliAction, String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args: Vec<String> = args.into_iter().map(Into::into).collect();
+    if args.is_empty() {
+        return Ok(CliAction::Run {
+            config_path: "configs/agent.toml".into(),
+        });
+    }
+
+    match args[0].as_str() {
+        "--version" | "-V" | "version" => Ok(CliAction::Version),
+        "-c" | "--config" => {
+            if args.len() < 2 {
+                return Err(format!("{} requires a config path", args[0]));
+            }
+            if args.len() > 2 {
+                return Err(format!("unexpected extra arguments: {}", args[2..].join(" ")));
+            }
+            Ok(CliAction::Run {
+                config_path: args[1].clone(),
+            })
+        }
+        arg if arg.starts_with("--config=") => {
+            let config_path = arg.trim_start_matches("--config=");
+            if config_path.is_empty() {
+                return Err("--config requires a config path".into());
+            }
+            if args.len() > 1 {
+                return Err(format!("unexpected extra arguments: {}", args[1..].join(" ")));
+            }
+            Ok(CliAction::Run {
+                config_path: config_path.into(),
+            })
+        }
+        arg if arg.starts_with('-') => Err(format!("unknown argument: {}", arg)),
+        config_path => {
+            if args.len() > 1 {
+                return Err(format!("unexpected extra arguments: {}", args[1..].join(" ")));
+            }
+            Ok(CliAction::Run {
+                config_path: config_path.into(),
+            })
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    let cli_action = match parse_cli_args(std::env::args().skip(1)) {
+        Ok(action) => action,
+        Err(err) => {
+            eprintln!("参数错误: {}", err);
+            eprintln!("用法: livecdn-agent [-c|--config <path>] [--version]");
+            std::process::exit(2);
+        }
+    };
+
+    if cli_action == CliAction::Version {
+        println!("{}", updater::AGENT_VERSION);
+        return;
+    }
+
     // 初始化日志
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -55,9 +125,9 @@ async fn main() {
         .init();
 
     // 加载配置
-    let config_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "configs/agent.toml".into());
+    let CliAction::Run { config_path } = cli_action else {
+        unreachable!();
+    };
     let config = Config::load(&config_path).unwrap_or_else(|e| {
         eprintln!("配置加载失败: {}", e);
         std::process::exit(1);
@@ -734,7 +804,7 @@ async fn get_or_create_relay(
     let key_info = KeyInfo::new(crate::crypto::CipherSuite::ChaCha20Poly1305)?;
     let origin_url = state.config.origin_hls_url(stream_key);
 
-    let mut relay = StreamRelay::new(
+    let relay = StreamRelay::new(
         stream_key.to_string(),
         origin_url,
         key_info,
@@ -890,7 +960,7 @@ async fn register_with_controller(config: &Config) -> Result<(), String> {
         cascade_upstream: config.is_cascade_node(),
     };
 
-    let url = format!("{}/api/agent/register", config.controller_url);
+    let url = config.controller_api_url("/api/agent/register");
     let resp = client.post(&url)
         .json(&reg)
         .timeout(std::time::Duration::from_secs(10))
@@ -911,6 +981,7 @@ async fn heartbeat_loop(state: Arc<AppState>) {
     let mut interval = tokio::time::interval(
         std::time::Duration::from_secs(state.config.hb_interval_secs)
     );
+    let client = reqwest::Client::new();
 
     loop {
         interval.tick().await;
@@ -954,10 +1025,16 @@ async fn heartbeat_loop(state: Arc<AppState>) {
             stream_lag_ms: 0,    // TODO: 从 FlvPuller 的 origin_ts 计算
         };
 
-        let client = reqwest::Client::new();
-        let url = format!("{}/api/agent/heartbeat", state.config.controller_url);
+        let url = state.config.controller_api_url("/api/agent/heartbeat");
 
-        match client.post(&url).json(&hb).timeout(std::time::Duration::from_secs(5)).send().await {
+        match client
+            .post(&url)
+            .bearer_auth(&state.config.reg_token)
+            .json(&hb)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 // 解析心跳响应中的 mesh_map (Controller 控制拓扑 + Agent 本地择优)
                 if let Ok(body) = resp.text().await {
@@ -972,7 +1049,14 @@ async fn heartbeat_loop(state: Arc<AppState>) {
                 debug!("心跳上报成功");
             }
             Ok(resp) => {
-                warn!("心跳返回异常: {}", resp.status());
+                let status = resp.status();
+                warn!("心跳返回异常: {}", status);
+                if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+                    warn!("Controller 不认识当前节点，尝试重新注册");
+                    if let Err(e) = register_with_controller(&state.config).await {
+                        warn!("重新注册失败: {}", e);
+                    }
+                }
             }
             Err(e) => {
                 warn!("心跳上报失败: {}", e);
@@ -984,4 +1068,46 @@ async fn heartbeat_loop(state: Arc<AppState>) {
 fn base64_encode(data: &[u8]) -> String {
     use base64::engine::general_purpose::STANDARD;
     base64::Engine::encode(&STANDARD, data)
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn parse_cli_args_defaults_to_repo_config() {
+        assert_eq!(
+            parse_cli_args(Vec::<String>::new()).unwrap(),
+            CliAction::Run {
+                config_path: "configs/agent.toml".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_args_accepts_systemd_config_flag() {
+        assert_eq!(
+            parse_cli_args(["-c", "/etc/livecdn/agent.toml"]).unwrap(),
+            CliAction::Run {
+                config_path: "/etc/livecdn/agent.toml".into(),
+            }
+        );
+        assert_eq!(
+            parse_cli_args(["--config=/etc/livecdn/agent.toml"]).unwrap(),
+            CliAction::Run {
+                config_path: "/etc/livecdn/agent.toml".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_args_accepts_version_probe() {
+        assert_eq!(parse_cli_args(["--version"]).unwrap(), CliAction::Version);
+    }
+
+    #[test]
+    fn parse_cli_args_rejects_unknown_flags() {
+        assert!(parse_cli_args(["--unknown"]).is_err());
+        assert!(parse_cli_args(["-c"]).is_err());
+    }
 }

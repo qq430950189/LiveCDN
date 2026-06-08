@@ -85,7 +85,7 @@ func (s *MemoryStore) RegisterNode(req *common.RegisterRequest) error {
 		CascadeEgressBW: 0,
 		CurrentUpstream: "",
 		// 动态权重 (参考 Nginx 三权分离): 新节点从低权重开始慢启动
-		EffectiveWeight: 0.5, // 新节点慢启动, 从50%权重开始逐步恢复到1.0
+		EffectiveWeight:  0.5, // 新节点慢启动, 从50%权重开始逐步恢复到1.0
 		ConsecutiveFails: 0,
 	}
 	s.nodes[req.NodeID] = node
@@ -234,6 +234,31 @@ func (s *MemoryStore) RemoveSession(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, id)
+}
+
+func (s *MemoryStore) TouchSession(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return false
+	}
+	session.LastActive = time.Now()
+	return true
+}
+
+func (s *MemoryStore) RemoveStaleSessions(timeout time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	removed := 0
+	for id, session := range s.sessions {
+		if time.Since(session.LastActive) > timeout {
+			delete(s.sessions, id)
+			removed++
+		}
+	}
+	return removed
 }
 
 // --- Complaint / cooling operations ---

@@ -1,9 +1,10 @@
 # Controller 配置
 listen_addr: ":8080"
-origin_addr: "http://origin:8080"    # 源站地址 (SRS)
+origin_addr: "http://origin:8080"    # HTTP 源站地址 (SRS HLS / HTTP-FLV)
+rtmp_origin_addr: "origin:1935"        # RTMP 推流地址 (host:port, 不带 rtmp://)
 reg_token: "reg-token-change-me"      # Agent 注册令牌
 admin_token: "admin-token-change-me"  # 管理员令牌
-cipher_suite: "chacha20"              # chacha20 / aes128
+cipher_suite: "chacha20-poly1305"   # chacha20-poly1305 / aes-128-cbc (兼容 chacha20 / aes128 别名)
 hb_timeout: 15                        # 心跳超时(秒)
 stale_node_timeout: 120               # 失效节点清理(秒)
 
@@ -13,3 +14,7 @@ stale_node_timeout: 120               # 失效节点清理(秒)
 #   - cdn1.example.com
 #   - cdn2.example.com
 #   - img-cdn.example.com
+
+# Agent 安装资源发布路径 (Controller 容器内路径)
+binary_dir: "./binaries"
+install_script_path: "./deploy/install.sh"
