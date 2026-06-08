@@ -175,6 +175,32 @@ cleanup_binary_tmp() {
 }
 trap cleanup_binary_tmp EXIT
 
+stop_unmanaged_agent_processes() {
+  command -v pgrep &>/dev/null || return 0
+
+  local pids=""
+  pids=$(pgrep -f "^${BINARY_PATH}( |$)" 2>/dev/null || true)
+  [[ -z "$pids" ]] && return 0
+
+  warn "发现未由当前 systemd 状态管理的旧 livecdn-agent 进程，准备停止: $pids"
+  for pid in $pids; do
+    [[ "$pid" == "$$" || "$pid" == "${BASHPID:-}" ]] && continue
+    $SUDO kill "$pid" 2>/dev/null || true
+  done
+
+  for _ in {1..10}; do
+    sleep 0.2
+    pids=$(pgrep -f "^${BINARY_PATH}( |$)" 2>/dev/null || true)
+    [[ -z "$pids" ]] && return 0
+  done
+
+  warn "旧 livecdn-agent 进程未正常退出，强制结束: $pids"
+  for pid in $pids; do
+    [[ "$pid" == "$$" || "$pid" == "${BASHPID:-}" ]] && continue
+    $SUDO kill -9 "$pid" 2>/dev/null || true
+  done
+}
+
 info "下载 Agent 二进制 (musl 静态链接, 零依赖)..."
 
 DOWNLOAD_OK=0
@@ -366,6 +392,7 @@ if $SUDO systemctl is-active --quiet livecdn-agent; then
   info "检测到 livecdn-agent 已在运行，重启以应用新二进制和配置..."
   $SUDO systemctl restart livecdn-agent
 else
+  stop_unmanaged_agent_processes
   $SUDO systemctl start livecdn-agent
 fi
 

@@ -175,7 +175,21 @@ journalctl -u livecdn-agent -f
 systemctl restart livecdn-agent
 ```
 
-### 5. 开播和拉流冒烟
+### 5. 打开管理后台
+
+如果通过 `docker-compose.yml` 的 `web` 服务访问静态管理页，地址通常是：
+
+```text
+http://<Web主机>:3000/admin.html
+```
+
+静态页运行在 `:3000`，Controller API 运行在 `:8080`。管理页会在从 `:3000` 打开时默认请求同主机 `:8080`，也可以在登录页手动填写 Controller API 地址，或通过 query 参数指定：
+
+```text
+http://<Web主机>:3000/admin.html?controller=http://<Controller主机>:8080
+```
+
+### 6. 开播和拉流冒烟
 
 使用管理员 API 创建直播：
 
@@ -243,7 +257,7 @@ http://<Web主机>:3000/player.html
 
 ### URL 能下载，但安装脚本仍提示下载失败
 
-如果你手动访问 `/downloads/livecdn-agent-...` 可以下载，但重复执行安装脚本失败，常见原因是旧 `livecdn-agent` 正在运行，直接覆盖 `/opt/livecdn/livecdn-agent` 可能触发 `Text file busy` 或目标文件写入失败。当前脚本已改为先下载到 `/opt/livecdn/.livecdn-agent-*.tmp`，验证后再原子替换目标二进制，并在服务已运行时自动 `restart`。
+如果你手动访问 `/downloads/livecdn-agent-...` 可以下载，但重复执行安装脚本失败，常见原因是旧 `livecdn-agent` 正在运行，直接覆盖 `/opt/livecdn/livecdn-agent` 可能触发 `Text file busy` 或目标文件写入失败。当前脚本已改为先下载到 `/opt/livecdn/.livecdn-agent-*.tmp`，验证后再原子替换目标二进制；如果 systemd 服务已运行会自动 `restart`，如果发现遗留的非 systemd 旧进程也会先停止再启动服务。
 
 如果仍失败，请查看错误中的 `原因:` 行，重点检查 `/opt/livecdn` 是否可写、磁盘空间是否足够，以及是否有安全策略阻止在该目录创建临时文件。
 

@@ -132,14 +132,52 @@ select.form-control{appearance:none;background-image:url("data:image/svg+xml,%3C
 // LiveCDN Admin Panel — 单文件 SPA
 // ============================================================
 
-const API = '';  // Same origin
+function normalizeBaseURL(value) {
+  return (value || '').trim().replace(/\/+$/, '');
+}
+
+function defaultControllerURL() {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = normalizeBaseURL(params.get('controller') || params.get('api'));
+  if (fromQuery) {
+    localStorage.setItem('livecdn_controller_url', fromQuery);
+    return fromQuery;
+  }
+
+  const saved = normalizeBaseURL(localStorage.getItem('livecdn_controller_url'));
+  if (saved) return saved;
+
+  // The static admin page is usually served by nginx on :3000 while the
+  // Controller API listens on :8080. When opened from :3000, default to the
+  // same host's Controller port instead of issuing broken same-origin requests.
+  if (window.location.port === '3000') {
+    return `${window.location.protocol}//${window.location.hostname}:8080`;
+  }
+  return window.location.origin;
+}
+
+let apiBase = defaultControllerURL();
 let authToken = localStorage.getItem('livecdn_admin_token') || '';
+
+function apiURL(path) {
+  return `${apiBase}${path.startsWith('/') ? path : '/' + path}`;
+}
+
+function escapeHTML(value) {
+  return String(value || '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
 
 // --- HTTP Helper ---
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-  const res = await fetch(API + path, { ...opts, headers });
+  const res = await fetch(apiURL(path), { ...opts, headers });
   if (res.status === 401) { logout(); throw new Error('unauthorized'); }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Request failed');
@@ -238,6 +276,10 @@ function renderLogin() {
       <h1>LiveCDN</h1>
       <p>管理后台</p>
       <div class="form-group">
+        <label>Controller API 地址</label>
+        <input type="text" class="form-control" id="controllerURL" value="${escapeHTML(apiBase)}" placeholder="http://controller:8080">
+      </div>
+      <div class="form-group">
         <label>管理员令牌</label>
         <input type="password" class="form-control" id="loginToken" placeholder="Admin Token" onkeydown="if(event.key==='Enter')doLogin()">
       </div>
@@ -248,10 +290,15 @@ function renderLogin() {
 
 async function doLogin() {
   const token = document.getElementById('loginToken').value.trim();
+  const controllerInput = document.getElementById('controllerURL');
+  const controllerURL = normalizeBaseURL(controllerInput ? controllerInput.value : apiBase);
   if (!token) return;
+  if (!controllerURL) { toast('请填写 Controller API 地址', 'error'); return; }
   try {
+    apiBase = controllerURL;
     authToken = token;
     await api('/api/admin/stats');
+    localStorage.setItem('livecdn_controller_url', apiBase);
     localStorage.setItem('livecdn_admin_token', token);
     toast('登录成功', 'success');
     render();
@@ -347,6 +394,8 @@ async function loadDashboard(el) {
     <div class="header-right">
       <span class="live-dot ${onlineNodes > 0 ? 'on' : 'off'}"></span>
       <span>${onlineNodes > 0 ? '系统运行中' : '无在线节点'}</span>
+      <span style="color:var(--dim)">|</span>
+      <span>API: ${escapeHTML(apiBase)}</span>
       <span style="color:var(--dim)">|</span>
       <span>自动刷新 5s</span>
     </div>
