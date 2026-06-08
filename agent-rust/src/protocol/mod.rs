@@ -262,6 +262,7 @@ pub struct HeartbeatPayload {
     pub bw_used: u64,
     pub bw_limit: u64,
     pub online_users: usize,
+    #[serde(rename = "rtt")]
     pub rtt_ms: u32,
     pub loss_rate: f64,
     pub version: String,
@@ -397,6 +398,29 @@ mod tests {
         assert_eq!(frame.frame_type, FrameType::Heartbeat);
         assert_eq!(frame.seq, 99);
         assert!(frame.payload.is_empty());
+    }
+
+    #[test]
+    fn test_heartbeat_payload_matches_go_controller_json() {
+        let hb = HeartbeatPayload {
+            node_id: "node-1".into(),
+            bw_used: 1,
+            bw_limit: 2,
+            online_users: 3,
+            rtt_ms: 42,
+            loss_rate: 0.01,
+            version: "test".into(),
+            cascade_depth: 1,
+            children_count: 2,
+            cascade_egress_bw: 3,
+            current_upstream: "upstream".into(),
+            stream_lag_ms: 4,
+        };
+
+        let json = serde_json::to_value(&hb).unwrap();
+        assert_eq!(json.get("rtt").unwrap(), 42);
+        assert!(json.get("rtt_ms").is_none());
+        assert_eq!(json.get("node_id").unwrap(), "node-1");
     }
 
     #[test]

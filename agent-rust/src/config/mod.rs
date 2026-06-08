@@ -81,6 +81,8 @@ impl Config {
         if let Ok(v) = env::var("CASCADE_ENABLED") { cfg.cascade_enabled = v == "true" || v == "1"; }
         if let Ok(v) = env::var("CASCADE_UPSTREAM") { cfg.cascade_upstream = Some(v); }
 
+        cfg.normalize();
+
         // 自动生成 node_id
         if cfg.node_id.is_empty() {
             let hostname = hostname::get()
@@ -147,8 +149,26 @@ impl Config {
     pub fn origin_hls_url(&self, stream_key: &str) -> String {
         format!(
             "{}/live/{}/stream.m3u8",
-            self.controller_url, stream_key
+            self.controller_url.trim_end_matches('/'), stream_key
         )
+    }
+
+    /// Build a Controller API URL robustly even if controller_url has a trailing slash.
+    pub fn controller_api_url(&self, path: &str) -> String {
+        let base = self.controller_url.trim_end_matches('/');
+        let path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{}", path)
+        };
+        format!("{}{}", base, path)
+    }
+
+    fn normalize(&mut self) {
+        self.controller_url = self.controller_url.trim_end_matches('/').to_string();
+        self.backup_origin_url = normalize_optional_template(self.backup_origin_url.take());
+        self.origin_flv_url = normalize_optional_template(self.origin_flv_url.take());
+        self.cascade_upstream = normalize_optional_template(self.cascade_upstream.take());
     }
 
     /// HTTP-FLV 回源地址
@@ -164,7 +184,7 @@ impl Config {
             return url.replace("{stream_key}", stream_key);
         }
         // 默认推导
-        format!("{}/live/{}.flv", self.controller_url, stream_key)
+        format!("{}/live/{}.flv", self.controller_url.trim_end_matches('/'), stream_key)
     }
 
     /// 是否为级联节点 (从其他 Agent 拉流而非 Origin)
@@ -175,6 +195,43 @@ impl Config {
     /// 是否允许其他 Agent 从本节点级联拉流
     pub fn is_cascade_relay(&self) -> bool {
         self.cascade_enabled
+    }
+}
+
+fn normalize_optional_template(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .filter(|v| !v.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn controller_api_url_trims_base_and_adds_slash() {
+        let mut cfg = Config::default_config();
+        cfg.controller_url = "http://controller:8080///".into();
+        cfg.normalize();
+
+        assert_eq!(cfg.controller_api_url("api/agent/register"), "http://controller:8080/api/agent/register");
+        assert_eq!(cfg.controller_api_url("/api/agent/heartbeat"), "http://controller:8080/api/agent/heartbeat");
+        assert_eq!(cfg.origin_hls_url("stream-1"), "http://controller:8080/live/stream-1/stream.m3u8");
+        assert_eq!(cfg.origin_flv_url("stream-1"), "http://controller:8080/live/stream-1.flv");
+    }
+
+    #[test]
+    fn normalizes_empty_optional_url_templates() {
+        let mut cfg = Config::default_config();
+        cfg.backup_origin_url = Some("   ".into());
+        cfg.origin_flv_url = Some("http://origin/live/{stream_key}.flv/".into());
+        cfg.cascade_upstream = Some("http://edge/live/{stream_key}.flv/".into());
+        cfg.normalize();
+
+        assert!(cfg.backup_origin_url.is_none());
+        assert_eq!(cfg.origin_flv_url.as_deref(), Some("http://origin/live/{stream_key}.flv"));
+        assert_eq!(cfg.cascade_upstream.as_deref(), Some("http://edge/live/{stream_key}.flv"));
+        assert_eq!(cfg.origin_flv_url("abc"), "http://edge/live/abc.flv");
     }
 }
 

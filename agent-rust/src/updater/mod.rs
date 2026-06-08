@@ -12,10 +12,8 @@ pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 检查更新并执行自更新
 /// 返回 true 表示已更新并应该重启
 pub async fn check_and_update(config: &Config) -> bool {
-    let controller_url = &config.controller_url;
-
     // 1. 检查 Controller 上是否有新版本
-    let version_url = format!("{}/api/admin/agent_version", controller_url);
+    let version_url = config.controller_api_url("/api/admin/agent_version");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -53,7 +51,7 @@ pub async fn check_and_update(config: &Config) -> bool {
         Some(ref url) => url.clone(),
         None => {
             // 使用默认下载路径
-            format!("{}/downloads/livecdn-agent-x86_64-unknown-linux-musl", controller_url)
+            config.controller_api_url("/downloads/livecdn-agent-x86_64-unknown-linux-musl")
         }
     };
 

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, RwLock, Semaphore};
 use tokio::time;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 pub mod backoff;
 pub mod cascade_selector;
@@ -20,12 +20,10 @@ pub mod flv_output;
 pub mod gop_cache;
 pub mod packet_drop;
 
-pub use flv::{FlvPuller, FlvTagPacket, FlvTagType};
-pub use gop_cache::{GopCache, GopCacheConfig, GopCacheStats};
-pub use packet_drop::{BackpressureTracker, DropPolicy, PacketPriority, should_drop};
-pub use cascade_selector::{CascadeSelector, CandidateUpstream, MeshMapResponse, CascadePath, MeshPolicy, LoopGuard, CascadeStats};
+pub use flv::FlvPuller;
+pub use cascade_selector::{CascadeSelector, MeshMapResponse};
 
-use crate::crypto::{CipherSuite, KeyInfo, StreamEncryptor};
+use crate::crypto::{KeyInfo, StreamEncryptor};
 use crate::protocol::{Frame, FrameType};
 
 // --- m3u8 解析器 ---
