@@ -163,40 +163,57 @@ BINARY_PATH="$INSTALL_DIR/livecdn-agent"
 $SUDO mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
 
 # --- 下载 Agent 二进制 ---
-# musl 静态链接，不依赖任何系统库，直接下载即用
+# musl 静态链接，不依赖任何系统库，直接下载即用。
+# 注意：重装/升级时旧 agent 可能正在运行，不能直接 curl -o 覆盖正在执行的二进制，
+# 否则即使 URL 可访问也可能因 Text file busy / 写入目标失败导致 curl 退出。
+# 因此先下载到临时文件，验证后再原子替换目标路径。
 BINARY_URL="${CONTROLLER_URL}/downloads/livecdn-agent-${BINARY_ARCH}-unknown-linux-musl"
+BINARY_TMP="$INSTALL_DIR/.livecdn-agent-${BINARY_ARCH}.$$.$RANDOM.tmp"
+
+cleanup_binary_tmp() {
+  $SUDO rm -f "$BINARY_TMP" 2>/dev/null || true
+}
+trap cleanup_binary_tmp EXIT
 
 info "下载 Agent 二进制 (musl 静态链接, 零依赖)..."
 
 DOWNLOAD_OK=0
+DOWNLOAD_ERR=""
 if command -v curl &>/dev/null; then
-  if $SUDO curl -fSL --connect-timeout 10 --max-time 120 -o "$BINARY_PATH" "$BINARY_URL" 2>/dev/null; then
+  if DOWNLOAD_ERR=$($SUDO curl -fsSL --connect-timeout 10 --max-time 120 -o "$BINARY_TMP" "$BINARY_URL" 2>&1); then
     DOWNLOAD_OK=1
   fi
 elif command -v wget &>/dev/null; then
-  if $SUDO wget --timeout=120 -O "$BINARY_PATH" "$BINARY_URL" 2>/dev/null; then
+  if DOWNLOAD_ERR=$($SUDO wget --timeout=120 -O "$BINARY_TMP" "$BINARY_URL" 2>&1); then
     DOWNLOAD_OK=1
   fi
+else
+  DOWNLOAD_ERR="未找到 curl 或 wget"
 fi
 
 if [[ $DOWNLOAD_OK -eq 0 ]]; then
   error "下载失败: $BINARY_URL
+  原因: ${DOWNLOAD_ERR:-未知错误}
   请确保:
   1. Controller 正在运行
   2. 二进制文件已发布到 /downloads/ 路径
-  3. 网络连通"
+  3. 网络连通
+  4. 本机 $INSTALL_DIR 可写；如是重复安装，脚本会使用临时文件避免覆盖正在运行的二进制"
 fi
 
-$SUDO chmod +x "$BINARY_PATH"
+$SUDO chmod 0755 "$BINARY_TMP"
+
+# 快速验证可执行
+if ! "$BINARY_TMP" --version &>/dev/null; then
+  warn "下载的二进制无法执行，可能架构不匹配"
+fi
+
+$SUDO mv -f "$BINARY_TMP" "$BINARY_PATH"
+trap - EXIT
 
 # 验证二进制
 BINARY_SIZE=$(du -h "$BINARY_PATH" | cut -f1)
 info "Agent 二进制: $BINARY_SIZE (静态链接, 无需运行时)"
-
-# 快速验证可执行
-if ! "$BINARY_PATH" --version &>/dev/null; then
-  warn "二进制无法执行，可能架构不匹配"
-fi
 
 # --- 检测公网 IP 与地理信息 ---
 info "检测公网 IP..."
@@ -345,7 +362,12 @@ EOF
 
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable livecdn-agent
-$SUDO systemctl start livecdn-agent
+if $SUDO systemctl is-active --quiet livecdn-agent; then
+  info "检测到 livecdn-agent 已在运行，重启以应用新二进制和配置..."
+  $SUDO systemctl restart livecdn-agent
+else
+  $SUDO systemctl start livecdn-agent
+fi
 
 # --- 等待启动 ---
 info "等待启动..."

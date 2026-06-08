@@ -241,6 +241,12 @@ http://<Web主机>:3000/player.html
 3. `docker-compose.yml` 中存在 `./binaries:/app/binaries:ro` 挂载。
 4. Controller 环境变量包含 `BINARY_DIR=/app/binaries`。
 
+### URL 能下载，但安装脚本仍提示下载失败
+
+如果你手动访问 `/downloads/livecdn-agent-...` 可以下载，但重复执行安装脚本失败，常见原因是旧 `livecdn-agent` 正在运行，直接覆盖 `/opt/livecdn/livecdn-agent` 可能触发 `Text file busy` 或目标文件写入失败。当前脚本已改为先下载到 `/opt/livecdn/.livecdn-agent-*.tmp`，验证后再原子替换目标二进制，并在服务已运行时自动 `restart`。
+
+如果仍失败，请查看错误中的 `原因:` 行，重点检查 `/opt/livecdn` 是否可写、磁盘空间是否足够，以及是否有安全策略阻止在该目录创建临时文件。
+
 ### 安装脚本检测到 `127.0.0.1` 或无法检测公网 IP
 
 当前安装脚本不会再把 `127.0.0.1` 当作公网 IP 写入 Agent 配置。它会优先解析 `curl cip.cc` 的输出，并过滤回环、内网、链路本地和组播地址。如果自动检测失败，请使用：
