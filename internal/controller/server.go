@@ -47,7 +47,7 @@ type Server struct {
 }
 
 func NewServer(cfg *Config) *Server {
-	applyConfigDefaults(cfg)
+	ApplyConfigDefaults(cfg)
 	gin.SetMode(gin.ReleaseMode)
 	store := NewMemoryStore()
 	scheduler := NewScheduler(store)
@@ -1150,7 +1150,8 @@ func (s *Server) cleanupLoop() {
 	}
 }
 
-func applyConfigDefaults(cfg *Config) {
+// ApplyConfigDefaults fills backward-compatible defaults for optional controller settings.
+func ApplyConfigDefaults(cfg *Config) {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = ":8080"
 	}

@@ -32,17 +32,10 @@ func loadConfig(path string) (*controller.Config, error) {
 		// Use defaults
 		log.Printf("Config file not found (%s), using defaults", path)
 		cfg := &controller.Config{
-			ListenAddr:        ":8080",
-			OriginAddr:        "http://origin:8080",
-			RTMPOriginAddr:    "origin:1935",
-			RegToken:          "change-me-reg-token",
-			AdminToken:        "change-me-admin-token",
-			CipherSuite:       "chacha20-poly1305",
-			HBTimeout:         15,
-			StaleNodeTimeout:  120,
-			BinaryDir:         "./binaries",
-			InstallScriptPath: "./deploy/install.sh",
+			RegToken:   "change-me-reg-token",
+			AdminToken: "change-me-admin-token",
 		}
+		controller.ApplyConfigDefaults(cfg)
 		applyEnvOverrides(cfg)
 		return cfg, nil
 	}
@@ -52,32 +45,7 @@ func loadConfig(path string) (*controller.Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	// Apply defaults
-	if cfg.ListenAddr == "" {
-		cfg.ListenAddr = ":8080"
-	}
-	if cfg.OriginAddr == "" {
-		cfg.OriginAddr = "http://origin:8080"
-	}
-	if cfg.RTMPOriginAddr == "" {
-		cfg.RTMPOriginAddr = "origin:1935"
-	}
-	if cfg.CipherSuite == "" {
-		cfg.CipherSuite = "chacha20-poly1305"
-	}
-	if cfg.HBTimeout == 0 {
-		cfg.HBTimeout = 15
-	}
-	if cfg.StaleNodeTimeout == 0 {
-		cfg.StaleNodeTimeout = 120
-	}
-	if cfg.BinaryDir == "" {
-		cfg.BinaryDir = "./binaries"
-	}
-	if cfg.InstallScriptPath == "" {
-		cfg.InstallScriptPath = "./deploy/install.sh"
-	}
-
+	controller.ApplyConfigDefaults(cfg)
 	applyEnvOverrides(cfg)
 	return cfg, nil
 }

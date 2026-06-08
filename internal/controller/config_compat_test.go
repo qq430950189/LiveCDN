@@ -20,7 +20,7 @@ func TestApplyConfigDefaultsNormalizesCompatibilityValues(t *testing.T) {
 		CipherSuite: "chacha20",
 	}
 
-	applyConfigDefaults(cfg)
+	ApplyConfigDefaults(cfg)
 
 	if cfg.ListenAddr != ":8080" {
 		t.Fatalf("ListenAddr = %q, want :8080", cfg.ListenAddr)
