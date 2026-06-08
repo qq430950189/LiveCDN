@@ -32,6 +32,15 @@ type Config struct {
 	DomainPool        []string `yaml:"domain_pool"`         // 域名切换池: 多域名轮询 + 秒级切换
 	BinaryDir         string   `yaml:"binary_dir"`          // Agent 二进制发布目录
 	InstallScriptPath string   `yaml:"install_script_path"` // 一键安装脚本路径
+	ListenAddr       string   `yaml:"listen_addr"`
+	OriginAddr       string   `yaml:"origin_addr"`      // HTTP origin base URL for HLS/HTTP-FLV
+	RTMPOriginAddr   string   `yaml:"rtmp_origin_addr"` // RTMP host[:port] used in broadcaster push URLs
+	RegToken         string   `yaml:"reg_token"`
+	AdminToken       string   `yaml:"admin_token"`
+	CipherSuite      string   `yaml:"cipher_suite"`
+	HBTimeout        int      `yaml:"hb_timeout"`
+	StaleNodeTimeout int      `yaml:"stale_node_timeout"`
+	DomainPool       []string `yaml:"domain_pool"` // 域名切换池: 多域名轮询 + 秒级切换
 }
 
 // Server is the controller HTTP server
@@ -48,6 +57,7 @@ type Server struct {
 
 func NewServer(cfg *Config) *Server {
 	ApplyConfigDefaults(cfg)
+	applyConfigDefaults(cfg)
 	gin.SetMode(gin.ReleaseMode)
 	store := NewMemoryStore()
 	scheduler := NewScheduler(store)
@@ -1152,6 +1162,7 @@ func (s *Server) cleanupLoop() {
 
 // ApplyConfigDefaults fills backward-compatible defaults for optional controller settings.
 func ApplyConfigDefaults(cfg *Config) {
+func applyConfigDefaults(cfg *Config) {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = ":8080"
 	}
