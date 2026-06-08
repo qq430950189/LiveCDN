@@ -144,15 +144,22 @@ function defaultControllerURL() {
     return fromQuery;
   }
 
+  const apiPort = (params.get('api_port') || '8080').trim();
+  const currentPort = window.location.port;
+  const isStandardPort = !currentPort || currentPort === '80' || currentPort === '443';
+
+  // Static pages are often served from nginx on a non-Controller port such as
+  // :3000. Detect that before reading localStorage so stale saved :3000 values
+  // cannot keep sending API calls to the wrong origin. If the page is already
+  // opened from the Controller port (default :8080), keep same-origin behavior.
+  if (!isStandardPort && currentPort !== apiPort) {
+    const detected = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+    localStorage.setItem('livecdn_controller_url', detected);
+    return detected;
+  }
+
   const saved = normalizeBaseURL(localStorage.getItem('livecdn_controller_url'));
   if (saved) return saved;
-
-  // The static admin page is usually served by nginx on :3000 while the
-  // Controller API listens on :8080. When opened from :3000, default to the
-  // same host's Controller port instead of issuing broken same-origin requests.
-  if (window.location.port === '3000') {
-    return `${window.location.protocol}//${window.location.hostname}:8080`;
-  }
   return window.location.origin;
 }
 

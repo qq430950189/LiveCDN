@@ -27,7 +27,7 @@ Web Player ───────► Edge Agent(s)
 - **Controller（Go）**：节点注册、心跳、观众调度、直播流管理、质量上报、管理 API、Prometheus 指标、Agent 安装资源发布。
 - **Origin / Origin Backup（SRS）**：RTMP 推流入口，提供 HTTP-FLV/HLS 源站能力。
 - **Web（Nginx 静态页）**：播放器和管理页面。
-- **Rust Agent**：推荐的边缘节点程序，裸机运行，负责伪装站、WebSocket/HTTP-FLV 拉流、级联回源、心跳、自更新等。
+- **Rust Agent**：推荐的边缘节点程序，必须按项目初心以裸机单二进制运行，负责伪装站、WebSocket/HTTP-FLV 拉流、级联回源、心跳、自更新等；不提供也不推荐 Docker 化边缘部署。
 - **Go Agent**：早期兼容实现，保留用于开发和对照测试。
 
 ## 目录结构
@@ -40,7 +40,7 @@ internal/agent/          Go Agent 逻辑
 agent-rust/              Rust Agent
 configs/                 示例配置
 deploy/                  安装、卸载、构建、监控和 Ansible 部署脚本
-docker/                  Controller / Agent Dockerfile
+docker/                  Controller Dockerfile；Agent Dockerfile 仅为失败提示桩，不用于部署
 origin/                  SRS 配置
 web/                     播放器和管理静态页面
 binaries/                构建后放置 Agent 二进制的目录（本地生成，不提交）
@@ -70,6 +70,10 @@ binaries/                构建后放置 Agent 二进制的目录（本地生成
 rustup target add x86_64-unknown-linux-musl
 rustup target add aarch64-unknown-linux-musl
 ```
+
+## 边缘节点部署原则
+
+边缘 Agent 不使用 Docker。Docker 只用于核心 VPS 侧的 Controller / SRS / Web 播放器编排；边缘 NAT 节点使用 `deploy/build-binaries.sh` 产出的 musl 静态二进制，通过 `deploy/install.sh` 写入配置并交给 systemd 管理。仓库不提供可用的 Agent Docker 镜像；保留的 `docker/Dockerfile.agent` 只是失败提示桩，防止旧 CI/脚本误构建。测试环境也不再用 Docker service 模拟边缘节点，避免偏离低配 NAT 机器的真实部署路径。
 
 ## 快速开始
 
@@ -183,10 +187,11 @@ systemctl restart livecdn-agent
 http://<Web主机>:3000/admin.html
 ```
 
-静态页运行在 `:3000`，Controller API 运行在 `:8080`。管理页会在从 `:3000` 打开时默认请求同主机 `:8080`，也可以在登录页手动填写 Controller API 地址，或通过 query 参数指定：
+静态页运行在 `:3000`，Controller API 运行在 `:8080`。管理页会在从非 Controller 端口打开时默认请求同主机 `:8080`，也可以在登录页手动填写 Controller API 地址，或通过 query 参数指定：
 
 ```text
 http://<Web主机>:3000/admin.html?controller=http://<Controller主机>:8080
+http://<Web主机>:3000/admin.html?api_port=9090
 ```
 
 ### 6. 开播和拉流冒烟
@@ -215,6 +220,13 @@ ffmpeg -re -f lavfi \
 
 ```text
 http://<Web主机>:3000/player.html
+```
+
+播放器同样会在从 `:3000` 打开时默认调用同主机 `:8080` 的 Controller API；自定义端口或跨主机部署时可使用：
+
+```text
+http://<Web主机>:3000/player.html?controller=http://<Controller主机>:8080
+http://<Web主机>:3000/player.html?api_port=9090
 ```
 
 ## 重要路由

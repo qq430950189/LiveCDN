@@ -141,8 +141,34 @@ function log(msg, level = 'info') {
   if (panel.children.length > 200) panel.removeChild(panel.firstChild);
 }
 
+function normalizeBaseURL(value) {
+  return (value || '').trim().replace(/\/+$/, '');
+}
+
+function resolveControllerBase() {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = normalizeBaseURL(params.get('controller') || params.get('api'));
+  if (fromQuery) {
+    localStorage.setItem('livecdn_controller_url', fromQuery);
+    return fromQuery;
+  }
+
+  const apiPort = (params.get('api_port') || '8080').trim();
+  const currentPort = window.location.port;
+  const isStandardPort = !currentPort || currentPort === '80' || currentPort === '443';
+  if (!isStandardPort && currentPort !== apiPort) {
+    const detected = `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+    localStorage.setItem('livecdn_controller_url', detected);
+    return detected;
+  }
+
+  const saved = normalizeBaseURL(localStorage.getItem('livecdn_controller_url'));
+  if (saved) return saved;
+  return window.location.origin;
+}
+
 function apiURL(path) {
-  const base = (state.controllerURL || window.location.origin).replace(/\/+$/, '');
+  const base = normalizeBaseURL(state.controllerURL || resolveControllerBase());
   return `${base}${path.startsWith('/') ? path : '/' + path}`;
 }
 
@@ -539,7 +565,7 @@ async function requestDispatch() {
 window.startPlayback = async function() {
   const token = $('tokenInput').value.trim();
   const streamKey = $('streamInput').value.trim();
-  const controllerURL = new URLSearchParams(window.location.search).get('controller') || '';
+  const controllerURL = resolveControllerBase();
 
   if (!token || !streamKey) {
     alert('请输入观看令牌和流名称');
@@ -548,7 +574,7 @@ window.startPlayback = async function() {
 
   state.token = token;
   state.streamKey = streamKey;
-  state.controllerURL = controllerURL || window.location.origin;
+  state.controllerURL = controllerURL;
   state.connected = true;
   state.switchCount = 0;
 

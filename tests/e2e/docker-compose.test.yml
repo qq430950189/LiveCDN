@@ -1,19 +1,22 @@
-# LiveCDN E2E 测试环境
-# 用法: docker-compose -f docker-compose.test.yml up --abort-on-container-exit
-# 前置: 先构建 agent 和 controller 镜像
-
-version: "3.8"
+# LiveCDN E2E core test environment
+#
+# This compose file intentionally starts only core VPS-side services.
+# Edge Agents are part of the product's bare-metal/NAT-node path and must be
+# tested via the single static binary + deploy/install.sh flow, not Docker.
+#
+# Usage:
+#   docker compose -f tests/e2e/docker-compose.test.yml up --abort-on-container-exit
 
 services:
   # === SRS 源站 ===
   origin:
     image: ossrs/srs:5
     ports:
-      - "1935:1935"   # RTMP
-      - "8080:8080"   # HTTP-FLV / HLS
-      - "8890:8890/udp" # SRT
+      - "1935:1935"      # RTMP
+      - "8088:8080"      # HTTP-FLV / HLS
+      - "8890:8890/udp"  # SRT
     volumes:
-      - ../origin/srs.conf:/usr/local/srs/conf/srs.conf
+      - ../../origin/srs.conf:/usr/local/srs/conf/srs.conf
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/versions"]
       interval: 5s
@@ -23,74 +26,33 @@ services:
   # === Controller ===
   controller:
     build:
-      context: ..
+      context: ../..
       dockerfile: docker/Dockerfile.controller
     ports:
       - "9080:8080"
+    volumes:
+      - ../../binaries:/app/binaries:ro
+      - ../../deploy/install.sh:/app/deploy/install.sh:ro
     environment:
-      - LISTEN_ADDR=:8080
+      - CONTROLLER_LISTEN=:8080
       - ORIGIN_ADDR=http://origin:8080
+      - RTMP_ORIGIN_ADDR=origin:1935
       - REG_TOKEN=test-reg-token
       - ADMIN_TOKEN=test-admin-token
       - CIPHER_SUITE=chacha20
+      - BINARY_DIR=/app/binaries
+      - INSTALL_SCRIPT_PATH=/app/deploy/install.sh
     depends_on:
       origin:
         condition: service_healthy
 
-  # === Agent 1 (华东电信) ===
-  agent-1:
-    build:
-      context: ../agent-rust
-      dockerfile: ../docker/Dockerfile.agent
-    environment:
-      - NODE_ID=test-east-tel-1
-      - PUBLIC_IP=10.0.1.1
-      - PORT=9090
-      - REGION=华东
-      - ISP=电信
-      - CONTROLLER_URL=http://controller:8080
-      - REG_TOKEN=test-reg-token
-      - BW_LIMIT=10485760
-      - DOMAIN=agent1.test.local
-      - LISTEN_ADDR=:9090
-    depends_on:
-      - controller
-
-  # === Agent 2 (华南移动) ===
-  agent-2:
-    build:
-      context: ../agent-rust
-      dockerfile: ../docker/Dockerfile.agent
-    environment:
-      - NODE_ID=test-south-mob-1
-      - PUBLIC_IP=10.0.2.1
-      - PORT=9090
-      - REGION=华南
-      - ISP=移动
-      - CONTROLLER_URL=http://controller:8080
-      - REG_TOKEN=test-reg-token
-      - BW_LIMIT=10485760
-      - DOMAIN=agent2.test.local
-      - LISTEN_ADDR=:9090
-    depends_on:
-      - controller
-
-  # === Agent 3 (华北联通) ===
-  agent-3:
-    build:
-      context: ../agent-rust
-      dockerfile: ../docker/Dockerfile.agent
-    environment:
-      - NODE_ID=test-north-uni-1
-      - PUBLIC_IP=10.0.3.1
-      - PORT=9090
-      - REGION=华北
-      - ISP=联通
-      - CONTROLLER_URL=http://controller:8080
-      - REG_TOKEN=test-reg-token
-      - BW_LIMIT=10485760
-      - DOMAIN=agent3.test.local
-      - LISTEN_ADDR=:9090
+  # === Web 播放器 ===
+  web:
+    image: nginx:alpine
+    ports:
+      - "9300:80"
+    volumes:
+      - ../../web:/usr/share/nginx/html:ro
     depends_on:
       - controller
 
@@ -123,13 +85,12 @@ services:
         condition: service_healthy
 
   # === Toxiproxy (Chaos 测试) ===
+  # Use it against externally installed bare-metal Agents, e.g. upstream
+  # "EDGE_AGENT_IP:9090". Do not model edge nodes as Docker services here.
   toxiproxy:
     image: ghcr.io/shopify/toxiproxy:latest
     ports:
-      - "8474:8474"   # API
-    # 可通过 API 注入网络故障:
-    # curl -X POST http://localhost:8474/proxies -d '{"name":"agent1","upstream":"agent-1:9090"}'
-    # curl -X POST http://localhost:8474/proxies/agent1/toxics -d '{"type":"latency","attributes":{"latency":500}}'
+      - "8474:8474"
 
   # === k6 压测 ===
   k6:
@@ -138,10 +99,6 @@ services:
       - ./k6:/scripts
     environment:
       - CONTROLLER_URL=http://controller:8080
-      - STREAM_KEY=test
     command: run /scripts/e2e.js
     depends_on:
       - controller
-      - agent-1
-      - agent-2
-      - agent-3
