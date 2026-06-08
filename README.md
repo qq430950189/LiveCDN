@@ -148,12 +148,24 @@ curl -fsSL http://<Controller公网IP或域名>:8080/install.sh | bash -s -- \
   --isp=电信
 ```
 
+如果自动检测公网 IP 失败，或检测结果是 `127.0.0.1` / 内网地址，请显式指定公网 IPv4：
+
+```bash
+curl -fsSL http://<Controller公网IP或域名>:8080/install.sh | bash -s -- \
+  --token=<reg_token> \
+  --controller=http://<Controller公网IP或域名>:8080 \
+  --public-ip=<边缘节点公网IPv4> \
+  --region=山东枣庄 \
+  --isp=移动
+```
+
 安装脚本会：
 
 1. 检测 CPU 架构。
 2. 从 `${CONTROLLER_URL}/downloads/livecdn-agent-${ARCH}-unknown-linux-musl` 下载 Rust Agent。
-3. 写入 `/etc/livecdn/agent.toml`。
-4. 创建并启动 `livecdn-agent.service`。
+3. 优先通过 `cip.cc` 检测公网 IP、地区和运营商；失败时尝试多个纯 IP 服务；仍失败时要求使用 `--public-ip` 手动指定。
+4. 写入 `/etc/livecdn/agent.toml`。
+5. 创建并启动 `livecdn-agent.service`。
 
 常用管理命令：
 
@@ -228,6 +240,16 @@ http://<Web主机>:3000/player.html
 2. 仓库根目录存在 `binaries/livecdn-agent-x86_64-unknown-linux-musl` 或对应 ARM 文件。
 3. `docker-compose.yml` 中存在 `./binaries:/app/binaries:ro` 挂载。
 4. Controller 环境变量包含 `BINARY_DIR=/app/binaries`。
+
+### 安装脚本检测到 `127.0.0.1` 或无法检测公网 IP
+
+当前安装脚本不会再把 `127.0.0.1` 当作公网 IP 写入 Agent 配置。它会优先解析 `curl cip.cc` 的输出，并过滤回环、内网、链路本地和组播地址。如果自动检测失败，请使用：
+
+```bash
+--public-ip=<边缘节点公网IPv4>
+```
+
+同时建议显式传入 `--region` 和 `--isp`，这样 Controller 调度时能更准确地区分中国大区、省市和运营商线路。
 
 ### Docker Compose 提示 `version` obsolete
 
