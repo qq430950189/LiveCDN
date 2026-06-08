@@ -5,7 +5,7 @@
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_128_GCM, CHACHA20_POLY1305};
 use ring::digest::{digest, SHA256};
 use ring::hkdf::{KeyType, Salt};
-use ring::hmac::{sign, Key, HMAC_SHA256};
+use ring::hmac::{sign, verify, Key, HMAC_SHA256};
 use thiserror::Error;
 
 /// Helper type for HKDF output length
@@ -237,11 +237,10 @@ impl TokenSigner {
 
     /// 验证签名
     pub fn verify(&self, data: &str, signature: &str) -> bool {
-        let expected = self.sign(data);
-        ring::constant_time::verify_slices_are_equal(
-            expected.as_bytes(),
-            signature.as_bytes(),
-        ).is_ok()
+        let Some(signature_bytes) = hex_decode(signature) else {
+            return false;
+        };
+        verify(&self.key, data.as_bytes(), &signature_bytes).is_ok()
     }
 }
 
@@ -271,6 +270,29 @@ fn random_nonce() -> [u8; 12] {
 
 fn hex_encode(data: &[u8]) -> String {
     data.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for chunk in s.as_bytes().chunks_exact(2) {
+        let hi = hex_value(chunk[0])?;
+        let lo = hex_value(chunk[1])?;
+        out.push((hi << 4) | lo);
+    }
+    Some(out)
+}
+
+fn hex_value(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Fallback key derivation: SHA256(master_key || seq_bytes)

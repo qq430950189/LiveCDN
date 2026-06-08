@@ -85,7 +85,7 @@
 ### 3.1 核心服务 (Docker)
 - [x] docker-compose.yml (origin + controller + web)
 - [x] Go Controller Dockerfile
-- [x] Rust Agent Dockerfile (CI 构建用)
+- [x] Agent 裸机部署链路 (不提供 Dockerfile，CI/发布使用 musl 二进制构建)
 
 ### 3.2 边缘节点 (裸机部署)
 - [x] musl 静态二进制 (3.5MB, 零系统依赖)

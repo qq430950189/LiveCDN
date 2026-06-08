@@ -22,12 +22,17 @@ services:
 
 ### 1.2 边缘节点 (裸机/挂机宝)
 
-```bash
-# 编译 Agent
-cd agent-rust && cargo build --release --target x86_64-unknown-linux-musl
+边缘节点必须按真实部署方式以单二进制 + systemd 运行，不使用 Docker。
 
-# 部署
-./deploy/install.sh --controller http://CONTROLLER_IP:8080 --token reg-token-change-me
+```bash
+# 构建静态 Agent 二进制并发布到 ./binaries，供 Controller /downloads 下载
+./deploy/build-binaries.sh
+
+# 在边缘机器上部署
+curl -fsSL http://CONTROLLER_IP:8080/install.sh | bash -s -- \
+  --controller=http://CONTROLLER_IP:8080 \
+  --token=reg-token-change-me \
+  --public-ip=EDGE_PUBLIC_IP
 ```
 
 ### 1.3 测试工具
@@ -58,8 +63,8 @@ cd agent-rust && cargo build --release --target x86_64-unknown-linux-musl
 
 ```
 阶段 0: 环境搭建 ───────→ 阶段 1: 冒烟测试 ───────→ 阶段 2: 功能验证
-   [ ] Docker 启动            [ ] 推流→拉流            [ ] 加密链路
-   [ ] Agent 注册             [ ] 调度 API             [ ] 主备切换
+   [ ] 核心 Docker 启动       [ ] 推流→拉流            [ ] 加密链路
+   [ ] 裸机 Agent 注册        [ ] 调度 API             [ ] 主备切换
    [ ] 心跳正常               [ ] 播放器               [ ] 延迟档位
 
 阶段 3: 性能基准 ───────→ 阶段 4: 容灾混沌 ───────→ 阶段 5: 长稳压测

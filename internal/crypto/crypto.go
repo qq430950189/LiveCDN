@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -23,6 +24,19 @@ const (
 	CipherChaCha20 CipherSuite = "chacha20-poly1305"
 	CipherAES128   CipherSuite = "aes-128-cbc"
 )
+
+// NormalizeCipherSuite accepts historical short names and returns the canonical
+// wire value used by Agents and persisted StreamInfo records.
+func NormalizeCipherSuite(s string) (CipherSuite, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "chacha20", "chacha20-poly1305":
+		return CipherChaCha20, nil
+	case "aes", "aes128", "aes-128", "aes-128-cbc":
+		return CipherAES128, nil
+	default:
+		return "", fmt.Errorf("unsupported cipher suite: %s", s)
+	}
+}
 
 // KeyInfo holds encryption key material
 type KeyInfo struct {
