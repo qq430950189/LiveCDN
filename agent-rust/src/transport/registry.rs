@@ -15,14 +15,13 @@
 //!   - PlainWS 完整实现 (替代 transport/mod.rs 中的占位实现)
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
-use crate::protocol::{Frame, FrameType};
+use crate::protocol::Frame;
 use futures_util::{SinkExt, StreamExt};
 
 // --- 错误类型 ---

@@ -2,8 +2,7 @@
 //! 内嵌静态 HTML，让节点看起来像普通博客
 //! 支持随机路径前缀，增加隐蔽性
 
-use hyper::{Request, Response, body::Incoming};
-use std::sync::Arc;
+use hyper::Response;
 
 /// 伪装网站内容 (编译时嵌入)
 const BLOG_HTML: &str = include_str!("blog.html");
